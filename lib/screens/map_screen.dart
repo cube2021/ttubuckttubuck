@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:lucide_icons/lucide_icons.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:glassmorphism/glassmorphism.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
@@ -558,40 +558,85 @@ class _MapScreenState extends State<MapScreen> {
                 const SizedBox(height: 10),
                 // 버튼
                 if (_mode == MapMode.idle) ...[
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: _actionButton(
-                      icon: LucideIcons.navigation,
-                      label: 'GPS 자동 기록',
-                      color: const Color(0xFF2EA043),
-                      onTap: _startGpsRecording,
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(
+                          height: 52,
+                          child: _actionButton(
+                            icon: LucideIcons.navigation,
+                            label: 'GPS 기록',
+                            color: const Color(0xFF2EA043),
+                            onTap: _startGpsRecording,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: SizedBox(
+                          height: 52,
+                          child: _actionButton(
+                            icon: LucideIcons.edit3,
+                            label: '직접 그리기',
+                            color: Colors.blueAccent,
+                            onTap: _startDrawing,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ] else ...[
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: ElevatedButton(
-                      onPressed: _isSaving ? null : _stopAndSave,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      ),
-                      child: _isSaving
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.check_circle_outline, size: 20),
-                                const SizedBox(width: 8),
-                                Text(
-                                  _mode == MapMode.gpsRecording ? '기록 종료 및 저장' : '경로 완성 및 저장',
-                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                                ),
-                              ],
+                  Row(
+                    children: [
+                      if (_mode == MapMode.drawing) ...[
+                        Expanded(
+                          child: SizedBox(
+                            height: 52,
+                            child: ElevatedButton(
+                              onPressed: _undoLastPoint,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.white.withOpacity(0.1),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                              ),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(LucideIcons.undo2, size: 20),
+                                  SizedBox(width: 8),
+                                  Text('되돌리기', style: TextStyle(fontWeight: FontWeight.bold)),
+                                ],
+                              ),
                             ),
-                    ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
+                      Expanded(
+                        child: SizedBox(
+                          height: 52,
+                          child: ElevatedButton(
+                            onPressed: _isSaving ? null : _stopAndSave,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.redAccent,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            ),
+                            child: _isSaving
+                                ? const CircularProgressIndicator(color: Colors.white)
+                                : Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(Icons.check_circle_outline, size: 20),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        _mode == MapMode.gpsRecording ? '기록 종료 및 저장' : '경로 완성 및 저장',
+                                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ],

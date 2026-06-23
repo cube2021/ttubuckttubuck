@@ -2,20 +2,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:glassmorphism/glassmorphism.dart';
-import 'package:lucide_icons/lucide_icons.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
+import 'dart:ui' as ui;
 import '../services/config.dart';
 import '../services/park_service.dart';
 import '../services/gemini_service.dart';
 import '../models/park.dart';
+import '../models/user_preferences.dart';
+import '../models/weather_context.dart';
+import '../services/user_preferences_service.dart';
+import '../services/weather_transform_service.dart';
+import '../widgets/recommendation_feedback_bar.dart';
+import '../models/park_route.dart';
+import '../services/park_route_service.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/notification_service.dart';
+import '../utils/geo_utils.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -24,7 +33,10 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   String? selectedMood;
   List<Map<String, dynamic>> _records = [];
   String? _googleFitError; // Debug logger for native Google Fit issues
@@ -36,7 +48,11 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _useDesignatedRoute = true;
   int _currentStep = 0; // 0: Start, 1: Mood, 2: Route, 3: Result
   String? _aiRecommendationText; // Gemini AI 추천 메시지
+  UserPreferences _userPreferences = UserPreferences.defaults;
+  WeatherContext _weatherContext = WeatherContext.fallback;
   List<LatLng> _currentRouteForMap = [];
+  bool _isExperimentalEnabled = false; // 실험적 기능 설정
+  final MapController _mapController = MapController();
   
   // Weather & Dust States
   String _weatherTemp = '--';
@@ -71,70 +87,96 @@ class _HomeScreenState extends State<HomeScreen> {
     _fetchRecords();
     _initGoogleFitSteps();
     _checkAttendanceStatus();
+    _loadExperimentalSetting();
     NotificationService().scheduleDailyAttendanceNotification();
   }
 
-  Future<void> _checkAttendanceStatus() async {
+  Future<void> _loadExperimentalSetting() async {
     final prefs = await SharedPreferences.getInstance();
-    final today = DateTime.now().toString().split(' ')[0];
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return;
-
-    final lastCheckIn = prefs.getString('last_check_in_date_${user.id}');
-    
     if (mounted) {
       setState(() {
-        _hasCheckedInToday = lastCheckIn == today;
-        _attendanceStreak = prefs.getInt('attendance_streak_${user.id}') ?? 0;
+        _isExperimentalEnabled = prefs.getBool('experimental_park_recommendation') ?? false;
       });
+    }
+  }
+
+  Future<void> _checkAttendanceStatus() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    final today = DateTime.now().toString().split(' ')[0];
+    try {
+      final rows = await Supabase.instance.client
+          .from('attendance_records')
+          .select('check_in_date, streak')
+          .eq('user_id', user.id)
+          .order('check_in_date', ascending: false)
+          .limit(1);
+      if (rows.isNotEmpty) {
+        final last = rows[0];
+        if (mounted) {
+          setState(() {
+            _hasCheckedInToday = last['check_in_date'] == today;
+            _attendanceStreak = last['streak'] as int? ?? 0;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('출석 상태 로드 실패: $e');
     }
   }
 
   Future<void> _performAttendanceCheck() async {
     if (_hasCheckedInToday) return;
-
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
 
-    final prefs = await SharedPreferences.getInstance();
     final today = DateTime.now().toString().split(' ')[0];
     final yesterday = DateTime.now().subtract(const Duration(days: 1)).toString().split(' ')[0];
-    
-    final lastCheckIn = prefs.getString('last_check_in_date_${user.id}');
-    
-    int newStreak = 1;
-    if (lastCheckIn == yesterday) {
-      newStreak = (prefs.getInt('attendance_streak_${user.id}') ?? 0) + 1;
-    }
-    
-    await prefs.setString('last_check_in_date_${user.id}', today);
-    await prefs.setInt('attendance_streak_${user.id}', newStreak);
-    
-    if (mounted) {
-      setState(() {
-        _hasCheckedInToday = true;
-        _attendanceStreak = newStreak;
-      });
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('🎉 출석 완료! 연속 $_attendanceStreak일 출석했습니다.'),
-          backgroundColor: const Color(0xFF2EA043),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      
-      try {
-        final user = Supabase.instance.client.auth.currentUser;
-        if (user != null) {
-          await Supabase.instance.client.from('attendance_records').insert({
-            'user_id': user.id,
-            'check_in_date': today,
-            'streak': newStreak,
-          });
+
+    try {
+      // 서버에서 마지막 출석 데이터 조회
+      final rows = await Supabase.instance.client
+          .from('attendance_records')
+          .select('check_in_date, streak')
+          .eq('user_id', user.id)
+          .order('check_in_date', ascending: false)
+          .limit(1);
+
+      int newStreak = 1;
+      if (rows.isNotEmpty) {
+        final last = rows[0];
+        if (last['check_in_date'] == today) return; // 이미 쯄서
+        if (last['check_in_date'] == yesterday) {
+          newStreak = (last['streak'] as int? ?? 0) + 1;
         }
-      } catch (e) {
-        debugPrint('Supabase 출석 기록 실패: $e');
+      }
+
+      // Supabase에 출석 기록
+      await Supabase.instance.client.from('attendance_records').insert({
+        'user_id': user.id,
+        'check_in_date': today,
+        'streak': newStreak,
+      });
+
+      if (mounted) {
+        setState(() {
+          _hasCheckedInToday = true;
+          _attendanceStreak = newStreak;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('🎉 출석 완료! 연속 ${newStreak}일 출석했습니다.'),
+            backgroundColor: const Color(0xFF2EA043),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('출석 처리 실패: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('출석 처리 중 오류가 발생했습니다. 다시 시도해 주세요.'), backgroundColor: Colors.redAccent),
+        );
       }
     }
   }
@@ -270,10 +312,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (weatherRes.statusCode == 200 && mounted) {
         final data = json.decode(weatherRes.body);
+        String krLocationName = data['name'];
+        try {
+          final nomUrl = 'https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&accept-language=ko';
+          final nomRes = await http.get(Uri.parse(nomUrl), headers: {'User-Agent': 'ttubuk_ttubuk_app'});
+          if (nomRes.statusCode == 200) {
+             final nomData = json.decode(utf8.decode(nomRes.bodyBytes));
+             if (nomData['address'] != null) {
+                final addr = nomData['address'];
+                // 동/읍/면 단위 우선, 없으면 구/시 단위
+                krLocationName = addr['suburb'] ?? addr['town'] ?? addr['borough'] ?? addr['city'] ?? data['name'];
+             }
+          }
+        } catch (_) {}
+
         setState(() {
           _weatherTemp = data['main']['temp'].toStringAsFixed(1);
           _weatherDesc = data['weather'][0]['description'];
-          _locationName = data['name'];
+          _locationName = krLocationName;
           _setWeatherIcon(data['weather'][0]['main']);
         });
       }
@@ -303,10 +359,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<LatLng> _parseRoute(dynamic routeJson) {
-    if (routeJson == null) return [];
-    try {
-      return (routeJson as List).map((p) => LatLng((p['lat'] as num).toDouble(), (p['lng'] as num).toDouble())).toList();
-    } catch (_) { return []; }
+    return parseLatLngList(routeJson);
   }
 
   Future<List<LatLng>> _getDesignatedRoute() async {
@@ -317,7 +370,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final routeString = prefs.getString('designated_route_${user.id}');
         if (routeString != null) {
           final List<dynamic> decoded = jsonDecode(routeString);
-          return decoded.map((p) => LatLng((p['lat'] as num).toDouble(), (p['lng'] as num).toDouble())).toList();
+          return parseLatLngList(decoded);
         }
       }
       return [];
@@ -335,7 +388,7 @@ class _HomeScreenState extends State<HomeScreen> {
       
       if (!_useDesignatedRoute && _selectedRecord != null) {
         route = _parseRoute(_selectedRecord!['route']);
-        dist = (_selectedRecord!['distance_km'] as num).toDouble();
+        dist = (_selectedRecord!['distance_km'] as num?)?.toDouble() ?? 1.0;
       } else {
         route = await _getDesignatedRoute();
         if (route.isEmpty) {
@@ -349,20 +402,23 @@ class _HomeScreenState extends State<HomeScreen> {
         dist = 1.0;
       }
       
-      final parks = await ParkService.findParksNearRoute(route, dist, moodId: selectedMood);
-      
-      final moodLabel = moods.firstWhere((m) => m['id'] == selectedMood, orElse: () => moods.first)['label'];
-      String aiText;
-      
-      if (parks.isNotEmpty) {
-        aiText = await GeminiService.getParkRecommendation(
-          parks: parks.take(3).toList(),
-          mood: moodLabel,
-          weather: _weatherDesc,
-        );
-      } else {
-        aiText = await GeminiService.getNoParkRecommendation(moodLabel, _weatherDesc);
-      }
+      _userPreferences = await UserPreferencesService.load();
+      final anchor = route.isNotEmpty ? route.first : const LatLng(37.5665, 126.9780);
+      _weatherContext = await WeatherTransformService.fetch(
+        anchor.latitude,
+        anchor.longitude,
+      );
+
+      final parks = await ParkService.findParksNearRouteFast(
+        route,
+        dist,
+        moodId: selectedMood,
+        weather: _weatherContext,
+      );
+
+      // 주변 공원은 AI 추천 없이 단순 정보만 보여줍니다.
+      String? aiText;
+      aiText = null;
 
       if (mounted) setState(() { 
         _recommendedParks = parks.take(5).toList(); 
@@ -383,6 +439,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white : Colors.black87;
 
@@ -753,21 +810,42 @@ class _HomeScreenState extends State<HomeScreen> {
         if (_aiRecommendationText != null) ...[
           const SizedBox(height: 16),
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: const Color(0xFF2EA043).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFF2EA043).withOpacity(0.3)),
+              color: const Color(0xFF2EA043).withOpacity(0.08),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFF2EA043).withOpacity(0.2)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.02),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                )
+              ]
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(LucideIcons.sparkles, color: Color(0xFF2EA043), size: 20),
+                const Icon(LucideIcons.sparkles, color: Color(0xFF2EA043), size: 22),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    _aiRecommendationText!,
-                    style: TextStyle(fontSize: 14, height: 1.5, color: textColor),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'AI 맞춤 추천 코스 가이드',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF2EA043)),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildFormattedText(_aiRecommendationText!, textColor),
+                      RecommendationFeedbackBar(
+                        parkName: _recommendedParks.isNotEmpty
+                            ? _recommendedParks.first.name
+                            : null,
+                        moodId: selectedMood,
+                        onFeedbackRecorded: _handleRecommend,
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -789,6 +867,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(24),
               child: FlutterMap(
+                mapController: _mapController,
                 options: MapOptions(
                   initialCenter: _currentRouteForMap.isNotEmpty ? _currentRouteForMap[0] : const LatLng(37.5665, 126.9780),
                   initialZoom: 14,
@@ -810,20 +889,93 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                   MarkerLayer(
-                    markers: _recommendedParks.map<Marker>((p) => Marker(
-                      point: p.location,
-                      width: 40, height: 40,
-                      child: Container(
-                        decoration: BoxDecoration(color: Colors.green.shade700, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
-                        child: const Icon(Icons.park, color: Colors.white, size: 20),
-                      ),
-                    )).toList(),
+                    markers: _recommendedParks.map<Marker>((p) {
+                      final distM = p.distanceFromRoute;
+                      final distKm = distM / 1000.0;
+                      // 도보 속도 4km/h 기준 소요 시간(분)
+                      final walkMin = (distM / (4000 / 60)).ceil();
+                      final distLabel = distKm >= 1.0
+                          ? '${distKm.toStringAsFixed(1)}km'
+                          : '${distM.toInt()}m';
+                      return Marker(
+                        point: p.location,
+                        width: 120,
+                        height: 72,
+                        alignment: Alignment.bottomCenter,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // 말풍선 라벨
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade800,
+                                borderRadius: BorderRadius.circular(10),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.25),
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    p.name,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '$distLabel · 도보 $walkMin분',
+                                    style: TextStyle(
+                                      color: Colors.white.withOpacity(0.85),
+                                      fontSize: 9,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            // 말풍선 꼬리
+                            CustomPaint(
+                              size: const Size(10, 5),
+                              painter: _BubbleTailPainter(Colors.green.shade800),
+                            ),
+                            // 아이콘 마커
+                            Container(
+                              width: 28,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade700,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.2),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(Icons.park, color: Colors.white, size: 16),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
                   ),
                 ],
               ),
             ),
           ),
-          const Text('추천 공원', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const Text('주변 산책 장소', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
           ..._recommendedParks.map((p) => _buildParkCard(p, textColor, isDark)),
         ],
@@ -837,6 +989,258 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Future<void> _designateParkRoute(ParkRoute route, String parkName) async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      final String? routesString = prefs.getString('designated_routes_list_${user.id}');
+      List<dynamic> routesList = [];
+      if (routesString != null) {
+        try {
+          routesList = jsonDecode(routesString);
+        } catch (_) {}
+      }
+      
+      final String newRouteId = DateTime.now().millisecondsSinceEpoch.toString();
+      
+      final routeData = route.points.map((p) => {
+        'lat': p.latitude,
+        'lng': p.longitude,
+      }).toList();
+      
+      final newRouteItem = {
+        'id': newRouteId,
+        'name': '$parkName - ${route.name}',
+        'route': routeData,
+      };
+      
+      routesList.add(newRouteItem);
+      
+      await prefs.setString('designated_routes_list_${user.id}', jsonEncode(routesList));
+      await prefs.setString('designated_route_${user.id}', jsonEncode(routeData));
+      await prefs.setString('designated_route_id_${user.id}', newRouteId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${route.name} 코스가 내 맞춤 산책 루트로 지정되었습니다! 🏃‍♂️'),
+            backgroundColor: const Color(0xFF2EA043),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('내 루트 지정 실패: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('지정 실패: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
+  }
+
+  void _showRouteSelectionSheet(Park park, Color textColor, bool isDark) {
+    final routes = park.routes;
+    
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1F1F1F) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      isScrollControlled: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return DraggableScrollableSheet(
+              initialChildSize: 0.6,
+              minChildSize: 0.4,
+              maxChildSize: 0.85,
+              expand: false,
+              builder: (context, scrollController) {
+                return SingleChildScrollView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40, height: 4,
+                          margin: const EdgeInsets.only(bottom: 20),
+                          decoration: BoxDecoration(
+                            color: textColor.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2EA043).withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(Icons.park, color: Color(0xFF2EA043)),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  park.name,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18,
+                                    color: textColor,
+                                  ),
+                                ),
+                                Text(
+                                  park.typeLabel,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: textColor.withOpacity(0.5),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        '🌳 추천 코스 가이드',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: textColor,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      if (routes.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 40),
+                          child: Center(child: Text('이 공원의 추천 루트가 아직 없습니다.')),
+                        )
+                      else
+                        ...routes.map((route) {
+                          Color diffColor = Colors.green;
+                          if (route.difficulty == '보통') diffColor = Colors.orange;
+                          if (route.difficulty == '어려움') diffColor = Colors.redAccent;
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 16),
+                            decoration: BoxDecoration(
+                              color: textColor.withOpacity(0.03),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: textColor.withOpacity(0.08)),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          route.name,
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 15,
+                                            color: textColor,
+                                          ),
+                                        ),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: diffColor.withOpacity(0.15),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Text(
+                                          route.difficulty,
+                                          style: TextStyle(
+                                            color: diffColor,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Icon(Icons.directions_walk, size: 14, color: textColor.withOpacity(0.4)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '${route.distanceKm}km',
+                                        style: TextStyle(fontSize: 12, color: textColor.withOpacity(0.5)),
+                                      ),
+                                      const SizedBox(width: 14),
+                                      Icon(Icons.access_time, size: 14, color: textColor.withOpacity(0.4)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '${route.durationMinutes}분 소요',
+                                        style: TextStyle(fontSize: 12, color: textColor.withOpacity(0.5)),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    route.description,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      height: 1.5,
+                                      color: textColor.withOpacity(0.6),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    height: 42,
+                                    child: ElevatedButton.icon(
+                                      onPressed: () {
+                                        Navigator.pop(context);
+                                        _designateParkRoute(route, park.name);
+                                      },
+                                      icon: const Icon(Icons.check_circle_outline, color: Colors.white, size: 16),
+                                      label: const Text(
+                                        '이 코스로 산책 시작 (대표 지정)',
+                                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFF2EA043),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        elevation: 0,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 
@@ -925,7 +1329,7 @@ class _HomeScreenState extends State<HomeScreen> {
       children: _records.map((record) {
         final isSelected = _selectedRecord == record;
         final date = DateTime.parse(record['created_at']).toLocal();
-        final dist = (record['distance_km'] as num).toDouble();
+        final dist = (record['distance_km'] as num?)?.toDouble() ?? 0.0;
         return GestureDetector(
           onTap: () => setState(() => _selectedRecord = record),
           child: Container(
@@ -977,29 +1381,150 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildParkCard(Park park, Color textColor, bool isDark) {
-    final moodKeyword = moods.firstWhere((m) => m['id'] == selectedMood)['keyword'];
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12), padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: textColor.withOpacity(0.05), borderRadius: BorderRadius.circular(24), border: Border.all(color: Colors.green.withOpacity(0.2))),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.park, color: Color(0xFF2EA043))),
-          const SizedBox(width: 16),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(park.name, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor)),
-            Text('${park.typeLabel} · 경로에서 ${park.distanceFromRoute.toInt()}m', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          ])),
-        ]),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: textColor.withOpacity(0.03), borderRadius: BorderRadius.circular(12)),
-          child: Row(children: [
-            const Icon(LucideIcons.info, size: 14, color: Color(0xFF2EA043)),
-            const SizedBox(width: 8),
-            Expanded(child: Text('현재 $moodKeyword 분위기의 산책을 즐기기에 딱 좋아요.', style: const TextStyle(fontSize: 12, color: Colors.white70))),
-          ]),
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      color: textColor.withOpacity(0.02),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        onTap: () {
+          if (_isExperimentalEnabled) {
+            _showRouteSelectionSheet(park, textColor, isDark);
+          } else {
+            // 실험적 기능 OFF: 지도를 해당 공원 위치로 이동
+            try {
+              _mapController.move(park.location, 16.0);
+            } catch (_) {}
+            // 지도가 화면에 보이도록 스크롤 (결과 상단으로)
+            Scrollable.ensureVisible(
+              context,
+              duration: const Duration(milliseconds: 400),
+              curve: Curves.easeInOut,
+            );
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2EA043).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.park, color: Color(0xFF2EA043), size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      park.name,
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textColor),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Text(park.typeLabel, style: TextStyle(fontSize: 12, color: textColor.withOpacity(0.6))),
+                        const SizedBox(width: 8),
+                        Text('· ${park.distanceFromRoute.toInt()}m', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        if (park.hasToilet) _buildFacilityIcon('🚽', true, '화장실'),
+                        if (park.hasBench) ...[const SizedBox(width: 6), _buildFacilityIcon('🪑', true, '벤치')],
+                        if (park.hasLighting) ...[const SizedBox(width: 6), _buildFacilityIcon('💡', true, '조명')],
+                        if (park.hasExerciseEquipment) ...[const SizedBox(width: 6), _buildFacilityIcon('💪', true, '운동기구')],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
-      ]),
+      ),
     );
   }
+
+  Widget _buildFacilityIcon(String icon, bool isAvailable, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: isAvailable ? const Color(0xFF2EA043).withOpacity(0.08) : Colors.grey.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: isAvailable ? const Color(0xFF2EA043).withOpacity(0.2) : Colors.grey.withOpacity(0.2),
+        ),
+      ),
+      child: Row(
+        children: [
+          Text(icon, style: const TextStyle(fontSize: 10)),
+          const SizedBox(width: 2),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+              color: isAvailable ? const Color(0xFF2EA043) : Colors.grey,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFormattedText(String text, Color textColor) {
+    final List<TextSpan> spans = [];
+    // 볼드 패턴 (**텍스트**)
+    final regExp = RegExp(r'\*\*(.*?)\*\*');
+    int start = 0;
+    
+    for (final match in regExp.allMatches(text)) {
+      if (match.start > start) {
+        spans.add(TextSpan(text: text.substring(start, match.start)));
+      }
+      spans.add(TextSpan(
+        text: match.group(1),
+        style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2EA043)),
+      ));
+      start = match.end;
+    }
+    if (start < text.length) {
+      spans.add(TextSpan(text: text.substring(start)));
+    }
+    
+    return RichText(
+      text: TextSpan(
+        style: TextStyle(fontSize: 13, height: 1.5, color: textColor),
+        children: spans,
+      ),
+    );
+  }
+}
+
+/// 말풍선 꼬리(삼각형) Painter
+class _BubbleTailPainter extends CustomPainter {
+  final Color color;
+  const _BubbleTailPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = color..style = PaintingStyle.fill;
+    // latlong2의 Path와 충돌 방지: dart:ui의 Path를 직접 인스턴스화
+    final path = ui.Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..lineTo(size.width, 0)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_BubbleTailPainter oldDelegate) => oldDelegate.color != color;
 }

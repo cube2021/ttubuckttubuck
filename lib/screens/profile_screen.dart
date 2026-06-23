@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:lucide_icons/lucide_icons.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:glassmorphism/glassmorphism.dart';
 import 'package:provider/provider.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -10,6 +10,7 @@ import 'display_settings_screen.dart';
 import 'my_route_settings_screen.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'walk_personality_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -28,6 +29,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _userName;
   int? _userAge;
   String? _userGender;
+  String? _userPersonality;
   String _appVersion = '불러오는 중...';
   String _shorebirdPatchInfo = 'Shorebird 패치 확인 중...';
   final _shorebirdUpdater = ShorebirdUpdater();
@@ -35,15 +37,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isLoading = false;
   bool _isSignUp = false;
   User? _user;
+  bool _experimentalEnabled = false;
 
   @override
   void initState() {
     super.initState();
     _initPackageInfo();
     _initShorebirdInfo();
+    _loadExperimentalSetting();
     _user = Supabase.instance.client.auth.currentUser;
     if (_user != null) {
       _fetchProfile();
+      _loadPersonality();
+    }
+  }
+
+  Future<void> _loadPersonality() async {
+    if (_user == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        _userPersonality = prefs.getString('pref_${_user!.id}_personality');
+      });
+    } catch (e) {
+      debugPrint('성향 로드 실패: $e');
+    }
+  }
+
+  Future<void> _loadExperimentalSetting() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        _experimentalEnabled = prefs.getBool('experimental_park_recommendation') ?? false;
+      });
+    } catch (e) {
+      debugPrint('실험적 기능 설정 로드 실패: $e');
     }
   }
 
@@ -206,8 +234,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           children: [
                             Text(_userName ?? '회원님', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
                             Text(_user!.email ?? '', style: TextStyle(color: textColor.withOpacity(0.5), fontSize: 13)),
+                            const SizedBox(height: 4),
                             if (_userAge != null)
                               Text('$_userAge세 / $_userGender', style: const TextStyle(color: Color(0xFF2EA043), fontSize: 12, fontWeight: FontWeight.w600)),
+                            if (_userPersonality != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4.0),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF2EA043).withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: const Color(0xFF2EA043).withOpacity(0.3)),
+                                  ),
+                                  child: Text(_userPersonality!, style: const TextStyle(color: Color(0xFF2EA043), fontSize: 11, fontWeight: FontWeight.bold)),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -250,6 +292,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       title: Text('내 루트 설정', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textColor)),
                       trailing: Icon(LucideIcons.chevronRight, size: 20, color: textColor.withOpacity(0.3)),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                    Divider(color: textColor.withOpacity(0.05), height: 1),
+                    Divider(color: textColor.withOpacity(0.05), height: 1),
+                    ListTile(
+                      onTap: () async {
+                        final result = await Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const WalkPersonalityScreen()),
+                        );
+                        if (result == true) {
+                          _loadPersonality();
+                        }
+                      },
+                      leading: const Icon(LucideIcons.footprints, color: Color(0xFF2EA043)),
+                      title: Text('산책 성향 분석 테스트', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textColor)),
+                      trailing: Icon(LucideIcons.chevronRight, size: 20, color: textColor.withOpacity(0.3)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                    Divider(color: textColor.withOpacity(0.05), height: 1),
+                    ListTile(
+                      onTap: () => Navigator.pushNamed(context, '/logs'),
+                      leading: const Icon(LucideIcons.fileText, color: Color(0xFF2EA043)),
+                      title: Text('앱 로그 보기', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textColor)),
+                      trailing: Icon(LucideIcons.chevronRight, size: 20, color: textColor.withOpacity(0.3)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                    Divider(color: textColor.withOpacity(0.05), height: 1),
+                    SwitchListTile(
+                      value: _experimentalEnabled,
+                      onChanged: (bool value) async {
+                        try {
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.setBool('experimental_park_recommendation', value);
+                          setState(() {
+                            _experimentalEnabled = value;
+                          });
+                        } catch (e) {
+                          debugPrint('실험적 기능 설정 저장 실패: $e');
+                        }
+                      },
+                      secondary: const Icon(LucideIcons.beaker, color: Color(0xFF2EA043)),
+                      title: Text('실험적 기능: 공원 내 추천', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textColor)),
+                      subtitle: Text('활성화 시 대형 공원에 한해 추천 산책 코스를 제공합니다.', style: TextStyle(fontSize: 12, color: textColor.withOpacity(0.5))),
+                      activeColor: const Color(0xFF2EA043),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     ),
                   ],
                 ),
