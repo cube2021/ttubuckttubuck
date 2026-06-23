@@ -6,6 +6,9 @@
 [![Backend Supabase](https://img.shields.io/badge/Supabase-Backend-3ECF8E?logo=supabase)](https://supabase.com/)
 [![Gemini AI](https://img.shields.io/badge/AI-Gemini_&_Groq-8E75B2?logo=google-gemini)](https://deepmind.google/technologies/gemini/)
 
+### 📥 [Android 앱 다운로드 (APK)](https://github.com/cube2021/ttubuckttubuck/raw/main/apk/ttubuckttubuck-release.apk)
+*최신 버전 앱을 다운로드하여 바로 설치해보세요!*
+
 ## ✨ 주요 기능 (Key Features)
 
 * **🗺️ 실시간 GPS 산책 추적**: 사용자의 이동 경로와 누적 거리를 1km 단위 마일스톤과 함께 직관적으로 기록합니다.
