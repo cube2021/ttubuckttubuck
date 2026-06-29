@@ -156,14 +156,17 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
       if (!completer.isCompleted) completer.complete(loc);
     }
 
-    // ① lastKnown — 즉시 (캐시)
+    // ① lastKnown — 즉시 (캐시) - 2분 이내의 신선한 위치만 허용
     Geolocator.getLastKnownPosition().then((pos) {
-      if (pos != null) resolve(LatLng(pos.latitude, pos.longitude));
+      if (pos != null) {
+        final isFresh = DateTime.now().difference(pos.timestamp).inMinutes < 2;
+        if (isFresh) resolve(LatLng(pos.latitude, pos.longitude));
+      }
     }).catchError((_) {});
 
     // ② getCurrentPosition — 네트워크 위치 (10초 타임아웃)
     Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.medium,
+      desiredAccuracy: LocationAccuracy.high,
       timeLimit: const Duration(seconds: 10),
     ).then((pos) {
       resolve(LatLng(pos.latitude, pos.longitude));
@@ -173,7 +176,7 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
     _positionStream?.cancel();
     _positionStream = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.medium,
+        accuracy: LocationAccuracy.high,
         distanceFilter: 20,
       ),
     ).listen(

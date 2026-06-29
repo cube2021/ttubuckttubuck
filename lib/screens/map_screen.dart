@@ -86,9 +86,12 @@ class _MapScreenState extends State<MapScreen> {
     if (permission == LocationPermission.denied) return;
 
     try {
-      // 마지막 알려진 위치를 먼저 즉시 적용 (빠른 반응)
+      // 마지막 알려진 위치를 먼저 즉시 적용 (2분 이내의 신선한 데이터만)
       final lastKnown = await Geolocator.getLastKnownPosition();
-      if (lastKnown != null) {
+      final bool isFresh = lastKnown != null && 
+          DateTime.now().difference(lastKnown.timestamp).inMinutes < 2;
+
+      if (isFresh) {
         setState(() {
           _currentPosition = LatLng(lastKnown.latitude, lastKnown.longitude);
         });
@@ -97,7 +100,7 @@ class _MapScreenState extends State<MapScreen> {
 
       // 더 정확한 현재 위치로 업데이트 (타임아웃 10초)
       final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.medium,
+        desiredAccuracy: LocationAccuracy.high,
         timeLimit: const Duration(seconds: 10),
       );
       if (mounted) {
