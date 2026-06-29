@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -33,6 +34,9 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
   final MapController _mapController = MapController();
   
   bool _isLoading = true;
+  Timer? _loadingTimer;
+  String? _loadingMessage;
+
   List<Park> _parks = [];
   LatLng _center = const LatLng(37.5665, 126.9780);
   String _regionName = '현재 위치 주변';
@@ -74,6 +78,33 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
     _loadRecommendations();
   }
 
+  @override
+  void dispose() {
+    _loadingTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startLoadingTimer() {
+    _loadingTimer?.cancel();
+    _loadingMessage = null;
+    int ticks = 0;
+    _loadingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      ticks++;
+      if (ticks == 3) {
+        if (mounted) setState(() => _loadingMessage = '데이터를 불러오는데에 조금 시간이 걸리고 있어요');
+      } else if (ticks == 10) {
+        if (mounted) setState(() => _loadingMessage = '데이터를 불러오는데에 생각보다 오래걸리고 있어요. 이 상태가 오랜 시간동안 지속된다면 앱을 재 실행 해주세요');
+      }
+    });
+  }
+
+  void _stopLoadingTimer() {
+    _loadingTimer?.cancel();
+    if (mounted) {
+      setState(() => _loadingMessage = null);
+    }
+  }
+
   Future<void> _loadLikedData() async {
     final prefs = await SharedPreferences.getInstance();
     final likedString = prefs.getString('liked_routes') ?? '{}';
@@ -96,7 +127,10 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
   }
 
   Future<void> _loadRecommendations() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _startLoadingTimer();
+    });
     try {
       // 주변 공원(내 주변)과 지역 추천 모두 실제 현재 GPS 정보를 기준으로 하도록 변경
       LatLng actualGpsLocation = await _getCurrentGpsLocation();
@@ -112,6 +146,7 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
           _weatherEvaluation = weather.walkingScoreMessage;
           _isLoading = false;
         });
+        _stopLoadingTimer();
         if (TutorialKeys.isTutorialRunning) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             TutorialKeys.mainLayoutKey.currentState?.startExploreTutorial();
@@ -121,7 +156,10 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
       }
     } catch (e) {
       debugPrint('추천 공원 불러오기 오류: $e');
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _stopLoadingTimer();
+      }
     }
   }
 
@@ -599,8 +637,30 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
           ),
           const SizedBox(height: 4),
           if (isScreenLoading)
-            const Expanded(
-              child: Center(child: CircularProgressIndicator(color: Color(0xFF2EA043))),
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const CircularProgressIndicator(color: Color(0xFF2EA043)),
+                    if (_loadingMessage != null) ...[
+                      const SizedBox(height: 16),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 32),
+                        child: Text(
+                          _loadingMessage!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: textColor.withOpacity(0.8),
+                            fontSize: 13,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             )
           else ...[
             // ─── 상단 지도 영역 ───
