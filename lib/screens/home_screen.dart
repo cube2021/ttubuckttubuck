@@ -442,42 +442,7 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
   void _handleRecommend() async {
     setState(() { isLoading = true; _currentStep = 3; _recommendedParks = []; _aiRecommendationText = null; });
     try {
-      final user = Supabase.instance.client.auth.currentUser;
-      if (user != null) {
-        final prefs = await SharedPreferences.getInstance();
-        final personality = prefs.getString('pref_${user.id}_personality');
-        if (personality == null || personality.isEmpty) {
-          if (mounted) {
-            setState(() { isLoading = false; _currentStep = 2; });
-            showDialog(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                backgroundColor: const Color(0xFF161B22),
-                title: const Text('산책 성향 분석 필요', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                content: const Text('정확한 AI 맞춤 공원 추천을 위해\n설정 탭의 산책 성향 분석 테스트를 먼저 진행해 주세요!', style: TextStyle(color: Colors.white70)),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('취소', style: TextStyle(color: Colors.grey)),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      // Switch to Profile Tab
-                      final mainState = TutorialKeys.mainLayoutKey.currentState;
-                      if (mainState != null) {
-                        mainState.setTabIndex(3);
-                      }
-                    },
-                    child: const Text('설정으로 이동', style: TextStyle(color: Color(0xFF2EA043), fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
-            );
-          }
-          return;
-        }
-      }
+
 
       List<LatLng> route;
       double dist;
