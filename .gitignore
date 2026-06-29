@@ -26,6 +26,7 @@ dist-ssr
 # Sensitive files
 .env
 shorebird.yaml
+lib/env/env.g.dart
 
 # Flutter/Dart
 build/
@@ -35,3 +36,12 @@ build/
 .packages
 .pub-cache/
 .pub/
+
+# IDE
+.idea/
+*.iml
+
+# Local/Generated
+android/local.properties
+brain/
+apk/

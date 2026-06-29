@@ -845,9 +845,8 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
                       ? () {
                           setState(() {
                             _useDesignatedRoute = true;
-                            selectedMood = moods.first['id']; // 기본 기분 설정
+                            _currentStep = 1; // 기분 선택 단계로 이동
                           });
-                          _handleRecommend();
                         }
                       : null,
                   style: ElevatedButton.styleFrom(

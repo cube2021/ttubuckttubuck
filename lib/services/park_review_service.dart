@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import '../env/env.dart';
 
 class ParkReview {
   final String id;
@@ -68,7 +68,7 @@ class ParkReviewService {
       }
 
       // 평점이 5개 미만인 경우 구글 플레이스 API 호출 (키가 있는 경우)
-      final googleKey = dotenv.env['GOOGLE_MAPS_API_KEY']?.trim();
+      final googleKey = Env.googleMapsApiKey;
       if (googleKey != null && googleKey.isNotEmpty) {
         try {
           final url = Uri.parse('https://places.googleapis.com/v1/places:searchText');
@@ -78,6 +78,8 @@ class ParkReviewService {
               'Content-Type': 'application/json',
               'X-Goog-Api-Key': googleKey,
               'X-Goog-FieldMask': 'places.displayName,places.rating,places.userRatingCount',
+              'X-Android-Package': 'com.ttubuk.ttubuk_ttubuk',
+              'X-Android-Cert': '27A4CEE4E50750CA8986925A8E406734BC1E79BD',
             },
             body: jsonEncode({
               'textQuery': parkName,

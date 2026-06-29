@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/foundation.dart';
+import '../env/env.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../models/park.dart';
@@ -167,10 +167,10 @@ class GeminiService {
     UserPreferences? preferences,
     WeatherContext? weatherContext,
   }) async {
-    final geminiKey = dotenv.env['GEMINI_API_KEY']?.trim();
-    final groqKey = dotenv.env['GROQ_API_KEY']?.trim();
+    final geminiKey = Env.geminiApiKey;
+    final groqKey = Env.groqApiKey;
 
-    if (dotenv.env.isEmpty) {
+    if (geminiKey.isEmpty && groqKey.isEmpty) {
       debugPrint("Dotenv 오류: 환경 변수가 로드되지 않았습니다.");
       return "설정 파일을 불러오지 못했습니다. 앱을 다시 시작해주세요.";
     }
@@ -283,8 +283,8 @@ class GeminiService {
   }
 
   static Future<String> getNoParkRecommendation(String mood, String weather) async {
-    final geminiKey = dotenv.env['GEMINI_API_KEY']?.trim();
-    final groqKey = dotenv.env['GROQ_API_KEY']?.trim();
+    final geminiKey = Env.geminiApiKey;
+    final groqKey = Env.groqApiKey;
 
     final systemInstruction = PromptTemplates.noParkSystemInstruction;
     final prompt = PromptTemplates.buildNoParkPrompt(mood, weather);
@@ -344,8 +344,8 @@ class GeminiService {
     required String regionName,
     required UserPreferences preferences,
   }) async {
-    final geminiKey = dotenv.env['GEMINI_API_KEY']?.trim();
-    final groqKey = dotenv.env['GROQ_API_KEY']?.trim();
+    final geminiKey = Env.geminiApiKey;
+    final groqKey = Env.groqApiKey;
     const systemInstruction = "당신은 대한민국 공원 전문 AI 가이드입니다. 오직 JSON 형식으로만 응답하세요.";
     final prompt = PromptTemplates.buildRegionJsonPrompt(
       regionName: regionName,
