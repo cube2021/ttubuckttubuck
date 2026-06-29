@@ -6,7 +6,7 @@
 [![Backend Supabase](https://img.shields.io/badge/Supabase-Backend-3ECF8E?logo=supabase)](https://supabase.com/)
 [![Gemini AI](https://img.shields.io/badge/AI-Gemini_&_Groq-8E75B2?logo=google-gemini)](https://deepmind.google/technologies/gemini/)
 
-### 📥 [Android 앱 다운로드 (APK)]([https://github.com/cube2021/ttubuckttubuck/raw/main/apk/ttubuckttubuck-release.apk](https://drive.google.com/file/d/1HyPWENj2nuEtD7L-GTTeTOF58XGDq-7a/view?usp=drive_link))
+### 📥 [Android 앱 다운로드 (APK)]((https://github.com/cube2021/ttubuckttubuck/raw/main/apk/ttubuckttubuck-release.apk](https://drive.google.com/file/d/1HyPWENj2nuEtD7L-GTTeTOF58XGDq-7a/view?usp=drive_link))
 ![APK Version](https://img.shields.io/badge/APK-v2.1.0-brightgreen?logo=android)
 *최신 버전 앱을 다운로드하여 바로 설치해보세요! (최종 업데이트: 2026-06-29)*
 
