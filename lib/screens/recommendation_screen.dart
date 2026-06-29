@@ -39,10 +39,15 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
 
   List<Park> _parks = [];
   LatLng _center = const LatLng(37.5665, 126.9780);
+  bool _hasRealLocation = false; // 실제 GPS 위치를 받았는지 여부
   String _regionName = '현재 위치 주변';
 
+  // 실시간 GPS 스트림
+  StreamSubscription<Position>? _positionStream;
+  LatLng? _lastReloadedAt; // 마지막으로 공원을 갱신한 위치
+
   // 공유 탭 관련 상태 변수
-  int _activeTab = 0; // 0: 주변 공원, 1: 공유된 산책로, 2: 핫 코스
+  int _activeTab = 0;
   List<Map<String, dynamic>> _sharedRoutes = [];
   Map<String, dynamic>? _selectedSharedRoute;
   List<LatLng> _sharedRoutePoints = [];
@@ -65,9 +70,9 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
   String _doName = '';
 
   // 탐색 탭 내부 상태
-  int _innerExploreTab = 0; // 0: 주변, 1: 읍면동, 2: 시군구, 3: 도
+  int _innerExploreTab = 0;
 
-  // 좋아요 정보 로컬 저장 (id -> 좋아요 눌렀는지 여부)
+  // 좋아요 정보 로컬 저장
   Map<String, bool> _likedRoutes = {};
   Map<String, int> _localLikeCounts = {};
 
@@ -75,13 +80,162 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
   void initState() {
     super.initState();
     _loadLikedData();
-    _loadRecommendations();
+    _initGps(); // GPS 먼저 초기화, 위치 확인 후 데이터 로드
   }
 
   @override
   void dispose() {
     _loadingTimer?.cancel();
+    _positionStream?.cancel();
     super.dispose();
+  }
+
+  /// GPS 초기화 — lastKnown / getCurrentPosition / 스트림 세 소스 동시 시도
+  /// 가장 먼저 오는 위치로 초기 로딩 시작, 이후 스트림이 실시간 업데이트
+  Future<void> _initGps() async {
+    setState(() {
+      _isLoading = true;
+      _startLoadingTimer();
+    });
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _stopLoadingTimer();
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF161B22),
+            title: const Text('위치 권한 필요', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            content: const Text(
+              '주변 공원을 찾으려면 위치 권한이 필요합니다.\n설정에서 위치 권한을 허용해 주세요.',
+              style: TextStyle(color: Colors.white70),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('취소', style: TextStyle(color: Colors.grey)),
+              ),
+              TextButton(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  await Geolocator.openAppSettings();
+                },
+                child: const Text('설정 열기', style: TextStyle(color: Color(0xFF2EA043), fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+
+    if (permission == LocationPermission.denied) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _stopLoadingTimer();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('📍 위치 권한이 거부되었습니다.'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+
+    // ── 세 소스 동시 시도, 가장 먼저 오는 위치 사용 ──
+    final completer = Completer<LatLng>();
+    void resolve(LatLng loc) {
+      if (!completer.isCompleted) completer.complete(loc);
+    }
+
+    // ① lastKnown — 즉시 (캐시)
+    Geolocator.getLastKnownPosition().then((pos) {
+      if (pos != null) resolve(LatLng(pos.latitude, pos.longitude));
+    }).catchError((_) {});
+
+    // ② getCurrentPosition — 네트워크 위치 (10초 타임아웃)
+    Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.medium,
+      timeLimit: const Duration(seconds: 10),
+    ).then((pos) {
+      resolve(LatLng(pos.latitude, pos.longitude));
+    }).catchError((_) {});
+
+    // ③ 실시간 스트림 — 첫 이벤트도 초기 위치 소스로 활용
+    _positionStream?.cancel();
+    _positionStream = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.medium,
+        distanceFilter: 20,
+      ),
+    ).listen(
+      (Position pos) {
+        if (!mounted) return;
+        final newLatLng = LatLng(pos.latitude, pos.longitude);
+
+        // 초기 위치 completer에도 전달
+        resolve(newLatLng);
+
+        // 실시간 지도 중심 업데이트
+        setState(() {
+          _center = newLatLng;
+          _hasRealLocation = true;
+        });
+        try { _mapController.move(newLatLng, _mapController.camera.zoom); } catch (_) {}
+
+        // 100m 이상 이동 시 공원 재검색
+        if (_lastReloadedAt != null) {
+          final moved = Geolocator.distanceBetween(
+            _lastReloadedAt!.latitude, _lastReloadedAt!.longitude,
+            newLatLng.latitude, newLatLng.longitude,
+          );
+          if (moved >= 100 && !_isLoading) {
+            _lastReloadedAt = newLatLng;
+            _loadRecommendations();
+          }
+        }
+      },
+      onError: (e) => debugPrint('GPS 스트림 오류: $e'),
+    );
+
+    // 셋 중 하나라도 성공하면 즉시 로딩 (최대 20초 대기)
+    try {
+      final initialLocation = await completer.future
+          .timeout(const Duration(seconds: 20));
+      if (mounted) {
+        setState(() {
+          _center = initialLocation;
+          _hasRealLocation = true;
+          _lastReloadedAt = initialLocation;
+        });
+        _loadRecommendations();
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _stopLoadingTimer();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('📍 GPS 신호를 찾을 수 없습니다. 위치 서비스가 켜져 있는지 확인해 주세요.'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+            action: SnackBarAction(
+              label: '재시도',
+              textColor: Colors.white,
+              onPressed: _initGps,
+            ),
+          ),
+        );
+      }
+    }
   }
 
   void _startLoadingTimer() {
@@ -132,17 +286,15 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
       _startLoadingTimer();
     });
     try {
-      // 주변 공원(내 주변)과 지역 추천 모두 실제 현재 GPS 정보를 기준으로 하도록 변경
-      LatLng actualGpsLocation = await _getCurrentGpsLocation();
-      
-      // 실제 GPS 기준 2km 이내 공원 검색
-      final parks = await ParkService.findParksNearRouteFast([actualGpsLocation], 2.0);
-      final weather = await WeatherTransformService.fetch(actualGpsLocation.latitude, actualGpsLocation.longitude);
+      // GPS는 _initGps()에서 관리 — 여기선 현재 _center 값을 그대로 사용
+      final location = _center;
+
+      final parks = await ParkService.findParksNearRouteFast([location], 2.0);
+      final weather = await WeatherTransformService.fetch(location.latitude, location.longitude);
 
       if (mounted) {
         setState(() {
           _parks = parks;
-          _center = actualGpsLocation;
           _weatherEvaluation = weather.walkingScoreMessage;
           _isLoading = false;
         });
@@ -152,7 +304,7 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
             TutorialKeys.mainLayoutKey.currentState?.startExploreTutorial();
           });
         }
-        _loadAiRegionParks(actualGpsLocation);
+        _loadAiRegionParks(location);
       }
     } catch (e) {
       debugPrint('추천 공원 불러오기 오류: $e');
@@ -405,61 +557,8 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
     }
   }
 
-  Future<LatLng> _determineLocation() async {
-    try {
-      final user = Supabase.instance.client.auth.currentUser;
-      if (user != null) {
-        final prefs = await SharedPreferences.getInstance();
-        final routeString = prefs.getString('designated_route_${user.id}');
-        if (routeString != null) {
-          final List<dynamic> decoded = jsonDecode(routeString);
-          if (decoded.isNotEmpty) {
-            _regionName = '내 지정 루트';
-            return LatLng((decoded.first['lat'] as num).toDouble(), (decoded.first['lng'] as num).toDouble());
-          }
-        }
-      }
-    } catch (_) {}
 
-    _regionName = '현재 위치 기반';
-    return await _getCurrentGpsLocation();
-  }
 
-  Future<LatLng> _getCurrentGpsLocation() async {
-    try {
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
-        // 1. Get last known location first for instant UI response
-        final lastKnown = await Geolocator.getLastKnownPosition();
-        if (lastKnown != null) {
-          // Fetch more accurate position in the background
-          Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.medium,
-            timeLimit: const Duration(seconds: 3),
-          ).then((pos) {
-            if (mounted) {
-              setState(() {
-                _center = LatLng(pos.latitude, pos.longitude);
-              });
-            }
-          }).catchError((_) {});
-          return LatLng(lastKnown.latitude, lastKnown.longitude);
-        }
-
-        // 2. Fetch current position with a strict timeout if no last known exists
-        final position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.medium,
-          timeLimit: const Duration(seconds: 3),
-        );
-        return LatLng(position.latitude, position.longitude);
-      }
-    } catch (_) {}
-    
-    return const LatLng(37.5665, 126.9780);
-  }
 
   String _formatDuration(int seconds) {
     final m = (seconds ~/ 60).toString().padLeft(2, '0');
@@ -775,6 +874,18 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
                               ),
                             ),
                           ),
+                        // GPS 재탐색 버튼
+                        Positioned(
+                          bottom: (_activeTab == 1 && _selectedSharedRoute != null) ? 60 : 12,
+                          right: 12,
+                          child: FloatingActionButton(
+                            heroTag: 'gps_rescan_btn',
+                            mini: true,
+                            backgroundColor: const Color(0xFF2EA043),
+                            onPressed: _initGps,
+                            child: const Icon(Icons.my_location, color: Colors.white),
+                          ),
+                        ),
                       ],
                     ),
                   ),

@@ -47,15 +47,82 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _determinePosition() async {
     LocationPermission permission = await Geolocator.checkPermission();
+
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) return;
     }
-    final position = await Geolocator.getCurrentPosition();
-    setState(() {
-      _currentPosition = LatLng(position.latitude, position.longitude);
-    });
-    _mapController.move(_currentPosition, 15);
+
+    // 영구 거부 시 설정 다이얼로그 표시
+    if (permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF161B22),
+            title: const Text('위치 권한 필요', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            content: const Text(
+              '산책 경로를 기록하려면 위치 권한이 필요합니다.\n설정에서 위치 권한을 허용해 주세요.',
+              style: TextStyle(color: Colors.white70),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('취소', style: TextStyle(color: Colors.grey)),
+              ),
+              TextButton(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  await Geolocator.openAppSettings();
+                },
+                child: const Text('설정 열기', style: TextStyle(color: Color(0xFF2EA043), fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+
+    if (permission == LocationPermission.denied) return;
+
+    try {
+      // 마지막 알려진 위치를 먼저 즉시 적용 (빠른 반응)
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null) {
+        setState(() {
+          _currentPosition = LatLng(lastKnown.latitude, lastKnown.longitude);
+        });
+        _mapController.move(_currentPosition, 15);
+      }
+
+      // 더 정확한 현재 위치로 업데이트 (타임아웃 10초)
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+        timeLimit: const Duration(seconds: 10),
+      );
+      if (mounted) {
+        setState(() {
+          _currentPosition = LatLng(position.latitude, position.longitude);
+        });
+        _mapController.move(_currentPosition, 15);
+      }
+    } catch (e) {
+      debugPrint('GPS 위치 획득 실패: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('📍 GPS 신호를 찾을 수 없습니다. 잠시 후 다시 시도해 주세요.'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+            action: SnackBarAction(
+              label: '재시도',
+              textColor: Colors.white,
+              onPressed: _determinePosition,
+            ),
+          ),
+        );
+      }
+    }
   }
 
   // ───── GPS 기록 모드 ─────

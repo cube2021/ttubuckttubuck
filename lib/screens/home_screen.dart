@@ -311,25 +311,28 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
 
       Position? position;
       if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
-        position = await Geolocator.getLastKnownPosition();
+        // lastKnown은 나이와 무관하게 즉시 사용 (로딩 없이 빠른 반응)
+        final lastKnown = await Geolocator.getLastKnownPosition();
+        position = lastKnown;
+
+        // 백그라운드에서 최신 위치로 날씨 갱신 (UI 블로킹 없음)
+        Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.medium,
+          timeLimit: const Duration(seconds: 20),
+        ).then((freshPos) {
+          if (mounted) {
+            _fetchWeatherFromCoords(freshPos.latitude, freshPos.longitude);
+          }
+        }).catchError((_) {});
+
+        // lastKnown이 없는 경우(최초 설치)에만 블로킹 대기
         if (position == null) {
           try {
             position = await Geolocator.getCurrentPosition(
               desiredAccuracy: LocationAccuracy.medium,
-              timeLimit: const Duration(seconds: 5),
+              timeLimit: const Duration(seconds: 15),
             );
           } catch (_) {}
-        }
-        // 백그라운드에서 정확한 위치로 날씨 갱신
-        if (position != null) {
-          Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.medium,
-            timeLimit: const Duration(seconds: 5),
-          ).then((pos) {
-            if (mounted && (pos.latitude != position!.latitude || pos.longitude != position.longitude)) {
-              _fetchWeatherFromCoords(pos.latitude, pos.longitude);
-            }
-          }).catchError((_) {});
         }
       }
 
