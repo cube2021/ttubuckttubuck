@@ -27,6 +27,9 @@ import '../services/notification_service.dart';
 import '../utils/geo_utils.dart';
 import 'package:showcaseview/showcaseview.dart';
 import '../utils/tutorial_keys.dart';
+import '../services/park_review_service.dart';
+import '../widgets/park_review_sheet.dart';
+import '../widgets/park_rating_badge.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -839,10 +842,13 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
                 width: double.infinity, height: 64,
                 child: ElevatedButton(
                   onPressed: hasRoute
-                      ? () => setState(() {
+                      ? () {
+                          setState(() {
                             _useDesignatedRoute = true;
-                            _currentStep = 1;
-                          })
+                            selectedMood = moods.first['id']; // 기본 기분 설정
+                          });
+                          _handleRecommend();
+                        }
                       : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF2EA043),
@@ -1455,7 +1461,18 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
   }
 
   Widget _buildResultHeader(Color textColor, bool isDark) {
-    final moodLabel = moods.firstWhere((m) => m['id'] == selectedMood)['label'];
+    final moodMap = moods.firstWhere((m) => m['id'] == selectedMood, orElse: () => moods.first);
+    final moodLabel = moodMap['label'];
+    final score = _weatherContext.walkingScore;
+    final heatIdx = _weatherContext.heatIndex;
+    final humidity = _weatherContext.humidity;
+
+    // 산책 지수 색상
+    Color scoreColor;
+    if (score >= 75) scoreColor = const Color(0xFF2EA043);
+    else if (score >= 50) scoreColor = Colors.amber;
+    else scoreColor = Colors.redAccent;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1475,6 +1492,107 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
             const TextSpan(text: ' 기분을 고려한 맞춤 분석입니다.'),
           ],
         )),
+        const SizedBox(height: 12),
+        // 산책 지수 & 체감온도 뱃지 행
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            // 산책 지수
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: scoreColor.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: scoreColor.withOpacity(0.4)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(LucideIcons.footprints, size: 13, color: scoreColor),
+                  const SizedBox(width: 5),
+                  Text(
+                    '산책 지수 $score점',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: scoreColor),
+                  ),
+                ],
+              ),
+            ),
+            // 체감온도 (Heat Index)
+            if (heatIdx != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: (heatIdx >= 32 ? Colors.orange : Colors.blue).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: (heatIdx >= 32 ? Colors.orange : Colors.blue).withOpacity(0.4),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      heatIdx >= 32 ? LucideIcons.thermometerSun : LucideIcons.thermometer,
+                      size: 13,
+                      color: heatIdx >= 32 ? Colors.orange : Colors.blue,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      '체감 ${heatIdx.toStringAsFixed(1)}°C',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: heatIdx >= 32 ? Colors.orange : Colors.blue,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            // 습도
+            if (humidity != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.lightBlue.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.lightBlue.withOpacity(0.4)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(LucideIcons.droplets, size: 13, color: Colors.lightBlue),
+                    const SizedBox(width: 5),
+                    Text(
+                      '습도 ${humidity.toInt()}%',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.lightBlue),
+                    ),
+                  ],
+                ),
+              ),
+            // 폭염 경보 뱃지
+            if (_weatherContext.heatDangerLevel >= 1)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.red.withOpacity(0.4)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(LucideIcons.flame, size: 13, color: Colors.redAccent),
+                    const SizedBox(width: 5),
+                    Text(
+                      _weatherContext.heatWarningTitle.replaceAll(RegExp(r'^[🔴🟠🟡]\s*'), ''),
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.redAccent),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ],
     );
   }
@@ -1484,17 +1602,19 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 0,
       color: textColor.withOpacity(0.02),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: textColor.withOpacity(0.06)),
+      ),
       child: InkWell(
+        borderRadius: BorderRadius.circular(16),
         onTap: () {
           if (_isExperimentalEnabled) {
             _showRouteSelectionSheet(park, textColor, isDark);
           } else {
-            // 실험적 기능 OFF: 지도를 해당 공원 위치로 이동
             try {
               _mapController.move(park.location, 16.0);
             } catch (_) {}
-            // 지도가 화면에 보이도록 스크롤 (결과 상단으로)
             Scrollable.ensureVisible(
               context,
               duration: const Duration(milliseconds: 400),
@@ -1505,6 +1625,7 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
                 padding: const EdgeInsets.all(10),
@@ -1543,6 +1664,18 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
                     ),
                   ],
                 ),
+              ),
+              // 평점 버튼
+              GestureDetector(
+                onTap: () {
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (_) => ParkReviewSheet(parkName: park.name),
+                  );
+                },
+                child: ParkRatingBadge(parkName: park.name, textColor: textColor),
               ),
             ],
           ),

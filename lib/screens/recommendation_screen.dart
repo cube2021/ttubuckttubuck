@@ -16,6 +16,8 @@ import '../models/user_preferences.dart';
 import '../models/park.dart';
 import 'package:showcaseview/showcaseview.dart';
 import '../utils/tutorial_keys.dart';
+import '../widgets/park_review_sheet.dart';
+import '../widgets/park_rating_badge.dart';
 
 class RecommendationScreen extends StatefulWidget {
   const RecommendationScreen({super.key});
@@ -783,7 +785,24 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
                       ],
                     ),
                   ),
-                  Text('${_formatDistance(park.distanceFromRoute)}\n약 $minutes분', textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.orange)),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('${_formatDistance(park.distanceFromRoute)}\n약 $minutes분', textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.orange)),
+                      const SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: () {
+                          showModalBottomSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            backgroundColor: Colors.transparent,
+                            builder: (_) => ParkReviewSheet(parkName: park.name),
+                          );
+                        },
+                        child: ParkRatingBadge(parkName: park.name, textColor: textColor),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -914,7 +933,24 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
                                 ],
                               ),
                             ),
-                            Text('${_formatDistance(park.distanceFromRoute)}\n약 $minutes분', textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF2EA043))),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text('${_formatDistance(park.distanceFromRoute)}\n약 $minutes분', textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF2EA043))),
+                                const SizedBox(height: 8),
+                                GestureDetector(
+                                  onTap: () {
+                                    showModalBottomSheet(
+                                      context: context,
+                                      isScrollControlled: true,
+                                      backgroundColor: Colors.transparent,
+                                      builder: (_) => ParkReviewSheet(parkName: park.name),
+                                    );
+                                  },
+                                  child: ParkRatingBadge(parkName: park.name, textColor: textColor),
+                                ),
+                              ],
+                            ),
                           ],
                         ),
                       ),

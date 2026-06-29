@@ -56,7 +56,7 @@ class _ParkReviewSheetState extends State<ParkReviewSheet> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('?�기가 ?�록?�었?�니??'),
+            content: Text('후기가 등록되었습니다!'),
             backgroundColor: Color(0xFF2EA043),
           ),
         );
@@ -113,20 +113,36 @@ class _ParkReviewSheetState extends State<ParkReviewSheet> {
                   child: Center(child: CircularProgressIndicator(color: Color(0xFF2EA043))),
                 )
               else ...[
+                // 평점 요약
                 Row(
                   children: [
                     const Icon(Icons.star, color: Colors.amber, size: 22),
                     const SizedBox(width: 6),
                     Text(
                       _summary.count > 0 || _summary.isGoogleRating
-                          ? '${_summary.averageRating.toStringAsFixed(1)} (${_summary.count}�??�기${_summary.isGoogleRating ? ' - 구�? �?기�?' : ''})'
-                          : '?�직 ?�기가 ?�어??,
+                          ? '${_summary.averageRating.toStringAsFixed(1)} (${_summary.count}개 후기${_summary.isGoogleRating ? ' · 구글 평점' : ''})'
+                          : '아직 후기가 없어요',
                       style: TextStyle(fontSize: 14, color: textColor.withOpacity(0.7)),
                     ),
+                    if (_summary.isGoogleRating) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                        ),
+                        child: const Text(
+                          'Google',
+                          style: TextStyle(fontSize: 10, color: Colors.blue, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 20),
-                Text('별점 ?�기�?, style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
+                Text('별점 남기기', style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
                 const SizedBox(height: 8),
                 Row(
                   children: List.generate(5, (i) {
@@ -144,7 +160,7 @@ class _ParkReviewSheetState extends State<ParkReviewSheet> {
                   controller: _contentController,
                   maxLines: 3,
                   decoration: InputDecoration(
-                    hintText: '?�책 ?�기�??�겨주세??(?�택)',
+                    hintText: '산책 후기를 남겨주세요 (선택)',
                     filled: true,
                     fillColor: textColor.withOpacity(0.05),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -158,15 +174,16 @@ class _ParkReviewSheetState extends State<ParkReviewSheet> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF2EA043),
                       foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    child: Text(_submitting ? '?�록 �?..' : '?�기 ?�록'),
+                    child: Text(_submitting ? '등록 중...' : '후기 등록'),
                   ),
                 ),
                 const SizedBox(height: 24),
-                Text('최근 ?�기', style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
+                Text('최근 후기', style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
                 const SizedBox(height: 10),
                 if (_reviews.isEmpty)
-                  Text('�??�기�??�겨보세??', style: TextStyle(color: textColor.withOpacity(0.5)))
+                  Text('첫 후기를 남겨보세요!', style: TextStyle(color: textColor.withOpacity(0.5)))
                 else
                   ..._reviews.map((r) => Container(
                         margin: const EdgeInsets.only(bottom: 10),
@@ -174,6 +191,7 @@ class _ParkReviewSheetState extends State<ParkReviewSheet> {
                         decoration: BoxDecoration(
                           color: textColor.withOpacity(0.04),
                           borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: textColor.withOpacity(0.06)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -184,9 +202,13 @@ class _ParkReviewSheetState extends State<ParkReviewSheet> {
                                   r.rating,
                                   (_) => const Icon(Icons.star, size: 14, color: Colors.amber),
                                 ),
+                                ...List.generate(
+                                  5 - r.rating,
+                                  (_) => Icon(Icons.star_border, size: 14, color: Colors.grey.withOpacity(0.4)),
+                                ),
                                 const Spacer(),
                                 Text(
-                                  r.userName ?? '?�명',
+                                  r.userName ?? '익명',
                                   style: TextStyle(fontSize: 11, color: textColor.withOpacity(0.4)),
                                 ),
                               ],
@@ -195,6 +217,11 @@ class _ParkReviewSheetState extends State<ParkReviewSheet> {
                               const SizedBox(height: 6),
                               Text(r.content!, style: TextStyle(fontSize: 13, color: textColor)),
                             ],
+                            const SizedBox(height: 4),
+                            Text(
+                              '${r.createdAt.year}.${r.createdAt.month.toString().padLeft(2, '0')}.${r.createdAt.day.toString().padLeft(2, '0')}',
+                              style: TextStyle(fontSize: 10, color: textColor.withOpacity(0.3)),
+                            ),
                           ],
                         ),
                       )),

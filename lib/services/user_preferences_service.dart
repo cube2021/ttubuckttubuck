@@ -75,6 +75,9 @@ class UserPreferencesService {
     // 확장 항목은 JSON으로 통합 저장
     await prefs.setString('${prefix}detail', json.encode(preferences.toJson()));
 
+    // 성향 테스트 완료 마커 저장 (홈 화면 체크 & 프로필 표시용)
+    await prefs.setString('${prefix}personality', _purposeToLabel(preferences.purpose));
+
     // Supabase에 기본 성향 업데이트
     if (user != null) {
       try {
@@ -88,7 +91,6 @@ class UserPreferencesService {
     }
   }
 
-  /// 기존 호환성을 위해 편의시설만 저장하는 메서드 유지
   static Future<void> saveLocalFacilities({
     required bool prefersToilet,
     required bool prefersBench,
@@ -106,4 +108,17 @@ class UserPreferencesService {
       await prefs.setDouble('${prefix}max_km', maxWalkDistanceKm);
     }
   }
+
+  /// purpose 값을 사람이 읽기 쉬운 성향 라벨로 변환
+  static String _purposeToLabel(String? purpose) {
+    switch (purpose) {
+      case 'walking':
+        return '🌿 힐링 산책형';
+      case 'exercise':
+        return '🏃 운동형';
+      default:
+        return '맞춤 산책형';
+    }
+  }
 }
+
