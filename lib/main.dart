@@ -16,6 +16,8 @@ import 'services/theme_provider.dart';
 import 'services/notification_service.dart';
 import 'services/sync_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:showcaseview/showcaseview.dart';
+import 'utils/tutorial_keys.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -216,14 +218,31 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
 
 
-class MainLayout extends StatefulWidget {
+class MainLayout extends StatelessWidget {
   const MainLayout({super.key});
 
   @override
-  State<MainLayout> createState() => _MainLayoutState();
+  Widget build(BuildContext context) {
+    return ShowCaseWidget(
+      onFinish: () {
+        final state = TutorialKeys.mainLayoutKey.currentState;
+        if (state != null && TutorialKeys.isTutorialRunning) {
+          state.proceedTutorial();
+        }
+      },
+      builder: (context) => _MainLayoutContent(key: TutorialKeys.mainLayoutKey),
+    );
+  }
 }
 
-class _MainLayoutState extends State<MainLayout> {
+class _MainLayoutContent extends StatefulWidget {
+  const _MainLayoutContent({super.key});
+
+  @override
+  State<_MainLayoutContent> createState() => _MainLayoutContentState();
+}
+
+class _MainLayoutContentState extends State<_MainLayoutContent> {
   int _selectedIndex = 0;
   late final PageController _pageController;
   
@@ -234,10 +253,70 @@ class _MainLayoutState extends State<MainLayout> {
     const ProfileScreen(),
   ];
 
+  void setTabIndex(int index) {
+    if (mounted) {
+      setState(() {
+        _selectedIndex = index;
+        _pageController.jumpToPage(index);
+      });
+    }
+  }
+
+  void proceedTutorial() {
+    if (_selectedIndex == 0) {
+      setTabIndex(1);
+    } else if (_selectedIndex == 1) {
+      setTabIndex(2);
+    } else if (_selectedIndex == 2) {
+      setTabIndex(3);
+    } else if (_selectedIndex == 3) {
+      TutorialKeys.isTutorialRunning = false;
+      setTabIndex(0);
+    }
+  }
+
+  void startExploreTutorial() {
+    ShowCaseWidget.of(context).startShowCase([
+      TutorialKeys.exploreMapKey,
+      TutorialKeys.exploreTabBarKey,
+      TutorialKeys.historyTabKey,
+    ]);
+  }
+
+  void startHistoryTutorial() {
+    ShowCaseWidget.of(context).startShowCase([
+      TutorialKeys.historyListKey,
+      TutorialKeys.historyWalkButtonKey,
+      TutorialKeys.profileTabKey,
+    ]);
+  }
+
+  void startProfileTutorial() {
+    ShowCaseWidget.of(context).startShowCase([
+      TutorialKeys.profileRouteSettingsKey,
+      TutorialKeys.profileWalkPersonalityKey,
+    ]);
+  }
+
   @override
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: _selectedIndex);
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool('has_seen_interactive_guide') != true) {
+        if (mounted) {
+          TutorialKeys.isTutorialRunning = true;
+          ShowCaseWidget.of(context).startShowCase([
+            TutorialKeys.homeWeatherKey,
+            TutorialKeys.homeRouteKey,
+            TutorialKeys.exploreTabKey,
+          ]);
+          await prefs.setBool('has_seen_interactive_guide', true);
+        }
+      }
+    });
   }
 
   @override
@@ -272,11 +351,35 @@ class _MainLayoutState extends State<MainLayout> {
           unselectedItemColor: Colors.grey,
           showSelectedLabels: true,
           showUnselectedLabels: true,
-          items: const [
-            BottomNavigationBarItem(icon: Icon(LucideIcons.home), activeIcon: Icon(LucideIcons.home), label: '홈'),
-            BottomNavigationBarItem(icon: Icon(LucideIcons.compass), activeIcon: Icon(LucideIcons.compass), label: '탐색'),
-            BottomNavigationBarItem(icon: Icon(LucideIcons.history), activeIcon: Icon(LucideIcons.history), label: '기록'),
-            BottomNavigationBarItem(icon: Icon(LucideIcons.settings), activeIcon: Icon(LucideIcons.settings), label: '설정'),
+          items: [
+            const BottomNavigationBarItem(icon: Icon(LucideIcons.home), activeIcon: Icon(LucideIcons.home), label: '홈'),
+            BottomNavigationBarItem(
+              icon: Showcase(
+                key: TutorialKeys.exploreTabKey,
+                description: 'AI 추천 공원과 지도를 탐색하는 탐색 화면입니다.',
+                child: const Icon(LucideIcons.compass),
+              ),
+              activeIcon: const Icon(LucideIcons.compass),
+              label: '탐색'
+            ),
+            BottomNavigationBarItem(
+              icon: Showcase(
+                key: TutorialKeys.historyTabKey,
+                description: '내가 지금까지 다녀온 산책 코스 통계와 기록을 모아보는 화면입니다.',
+                child: const Icon(LucideIcons.history),
+              ),
+              activeIcon: const Icon(LucideIcons.history),
+              label: '기록'
+            ),
+            BottomNavigationBarItem(
+              icon: Showcase(
+                key: TutorialKeys.profileTabKey,
+                description: '내 루트 설정과 산책 성향 등을 변경하는 설정 화면입니다.',
+                child: const Icon(LucideIcons.settings),
+              ),
+              activeIcon: const Icon(LucideIcons.settings),
+              label: '설정'
+            ),
           ],
         ),
       ),

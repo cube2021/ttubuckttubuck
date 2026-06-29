@@ -14,6 +14,8 @@ import '../services/region_service.dart';
 import '../services/user_preferences_service.dart';
 import '../models/user_preferences.dart';
 import '../models/park.dart';
+import 'package:showcaseview/showcaseview.dart';
+import '../utils/tutorial_keys.dart';
 
 class RecommendationScreen extends StatefulWidget {
   const RecommendationScreen({super.key});
@@ -94,18 +96,26 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
   Future<void> _loadRecommendations() async {
     setState(() => _isLoading = true);
     try {
-      LatLng location = await _determineLocation();
-      final parks = await ParkService.findParksNearRouteFast([location], 2.0);
-      final weather = await WeatherTransformService.fetch(location.latitude, location.longitude);
+      // 주변 공원(내 주변)과 지역 추천 모두 실제 현재 GPS 정보를 기준으로 하도록 변경
+      LatLng actualGpsLocation = await _getCurrentGpsLocation();
       
+      // 실제 GPS 기준 2km 이내 공원 검색
+      final parks = await ParkService.findParksNearRouteFast([actualGpsLocation], 2.0);
+      final weather = await WeatherTransformService.fetch(actualGpsLocation.latitude, actualGpsLocation.longitude);
+
       if (mounted) {
         setState(() {
           _parks = parks;
-          _center = location;
+          _center = actualGpsLocation;
           _weatherEvaluation = weather.walkingScoreMessage;
           _isLoading = false;
         });
-        _loadAiRegionParks(location);
+        if (TutorialKeys.isTutorialRunning) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            TutorialKeys.mainLayoutKey.currentState?.startExploreTutorial();
+          });
+        }
+        _loadAiRegionParks(actualGpsLocation);
       }
     } catch (e) {
       debugPrint('추천 공원 불러오기 오류: $e');
@@ -241,6 +251,11 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
         }
         _isSharedLoading = false;
       });
+      if (TutorialKeys.isTutorialRunning) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          TutorialKeys.mainLayoutKey.currentState?.startExploreTutorial();
+        });
+      }
     }
   }
 
@@ -367,13 +382,38 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
     } catch (_) {}
 
     _regionName = '현재 위치 기반';
+    return await _getCurrentGpsLocation();
+  }
+
+  Future<LatLng> _getCurrentGpsLocation() async {
     try {
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
       if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
-        final position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.medium);
+        // 1. Get last known location first for instant UI response
+        final lastKnown = await Geolocator.getLastKnownPosition();
+        if (lastKnown != null) {
+          // Fetch more accurate position in the background
+          Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.medium,
+            timeLimit: const Duration(seconds: 3),
+          ).then((pos) {
+            if (mounted) {
+              setState(() {
+                _center = LatLng(pos.latitude, pos.longitude);
+              });
+            }
+          }).catchError((_) {});
+          return LatLng(lastKnown.latitude, lastKnown.longitude);
+        }
+
+        // 2. Fetch current position with a strict timeout if no last known exists
+        final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.medium,
+          timeLimit: const Duration(seconds: 3),
+        );
         return LatLng(position.latitude, position.longitude);
       }
     } catch (_) {}
@@ -550,7 +590,11 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
       ),
       body: Column(
         children: [
-          _buildTabSwitcher(textColor, isDark),
+          Showcase(
+            key: TutorialKeys.exploreTabBarKey,
+            description: '이 탭을 눌러 주변 공원을 보거나 다른 사람들이 공유한 산책로를 볼 수 있습니다!',
+            child: _buildTabSwitcher(textColor, isDark),
+          ),
           const SizedBox(height: 4),
           if (isScreenLoading)
             const Expanded(
@@ -561,16 +605,19 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
             if (_activeTab == 0 || (_activeTab == 1 && _selectedSharedRoute != null))
               Expanded(
                 flex: 2,
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(24),
-                    child: Stack(
-                      children: [
+                child: Showcase(
+                  key: TutorialKeys.exploreMapKey,
+                  description: '내 위치 또는 지정 루트 주변 공원과 공유 산책로를 지도로 봅니다.',
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(24),
+                      child: Stack(
+                        children: [
                         FlutterMap(
                           mapController: _mapController,
                           options: MapOptions(
@@ -669,6 +716,7 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
                       ],
                     ),
                   ),
+                ),
                 ),
               ),
             if (_activeTab == 0 || (_activeTab == 1 && _selectedSharedRoute != null)) const SizedBox(height: 16),

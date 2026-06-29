@@ -11,6 +11,8 @@ import 'my_route_settings_screen.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'walk_personality_screen.dart';
+import 'package:showcaseview/showcaseview.dart';
+import '../utils/tutorial_keys.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -50,6 +52,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _fetchProfile();
       _loadPersonality();
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (TutorialKeys.isTutorialRunning) {
+        TutorialKeys.mainLayoutKey.currentState?.startProfileTutorial();
+      }
+    });
   }
 
   Future<void> _loadPersonality() async {
@@ -283,32 +290,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                     ),
                     Divider(color: textColor.withOpacity(0.05), height: 1),
-                    ListTile(
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const MyRouteSettingsScreen()),
+                    Showcase(
+                      key: TutorialKeys.profileRouteSettingsKey,
+                      description: '자주 가는 나만의 산책 코스를 추가 및 편집하여 메인화면의 맞춤 루트로 사용할 수 있게 관리합니다.',
+                      child: ListTile(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const MyRouteSettingsScreen()),
+                        ),
+                        leading: const Icon(LucideIcons.map, color: Color(0xFF2EA043)),
+                        title: Text('내 루트 설정', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textColor)),
+                        trailing: Icon(LucideIcons.chevronRight, size: 20, color: textColor.withOpacity(0.3)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                       ),
-                      leading: const Icon(LucideIcons.map, color: Color(0xFF2EA043)),
-                      title: Text('내 루트 설정', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textColor)),
-                      trailing: Icon(LucideIcons.chevronRight, size: 20, color: textColor.withOpacity(0.3)),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                     ),
                     Divider(color: textColor.withOpacity(0.05), height: 1),
                     Divider(color: textColor.withOpacity(0.05), height: 1),
-                    ListTile(
-                      onTap: () async {
-                        final result = await Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => const WalkPersonalityScreen()),
-                        );
-                        if (result == true) {
-                          _loadPersonality();
-                        }
-                      },
-                      leading: const Icon(LucideIcons.footprints, color: Color(0xFF2EA043)),
-                      title: Text('산책 성향 분석 테스트', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textColor)),
-                      trailing: Icon(LucideIcons.chevronRight, size: 20, color: textColor.withOpacity(0.3)),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    Showcase(
+                      key: TutorialKeys.profileWalkPersonalityKey,
+                      description: '산책 성향 데이터가 없다면 먼저 이 테스트를 진행해 주세요! AI 맞춤 공원 추천의 정확도가 훨씬 높아집니다.',
+                      child: ListTile(
+                        onTap: () async {
+                          final result = await Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const WalkPersonalityScreen()),
+                          );
+                          if (result == true) {
+                            _loadPersonality();
+                          }
+                        },
+                        leading: const Icon(LucideIcons.footprints, color: Color(0xFF2EA043)),
+                        title: Text('산책 성향 분석 테스트', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textColor)),
+                        trailing: Icon(LucideIcons.chevronRight, size: 20, color: textColor.withOpacity(0.3)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      ),
                     ),
                     Divider(color: textColor.withOpacity(0.05), height: 1),
                     ListTile(

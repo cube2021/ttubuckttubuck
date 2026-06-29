@@ -25,6 +25,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/notification_service.dart';
 import '../utils/geo_utils.dart';
+import 'package:showcaseview/showcaseview.dart';
+import '../utils/tutorial_keys.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -298,53 +300,99 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
 
   Future<void> _fetchWeather() async {
     try {
-      Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      final lat = position.latitude;
-      final lon = position.longitude;
-      
-      // 1. 일반 날씨 및 지명
+      // 위치 권한 먼저 확인 및 요청
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      Position? position;
+      if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
+        position = await Geolocator.getLastKnownPosition();
+        if (position == null) {
+          try {
+            position = await Geolocator.getCurrentPosition(
+              desiredAccuracy: LocationAccuracy.medium,
+              timeLimit: const Duration(seconds: 5),
+            );
+          } catch (_) {}
+        }
+        // 백그라운드에서 정확한 위치로 날씨 갱신
+        if (position != null) {
+          Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.medium,
+            timeLimit: const Duration(seconds: 5),
+          ).then((pos) {
+            if (mounted && (pos.latitude != position!.latitude || pos.longitude != position.longitude)) {
+              _fetchWeatherFromCoords(pos.latitude, pos.longitude);
+            }
+          }).catchError((_) {});
+        }
+      }
+
+      final lat = position?.latitude ?? 37.5665;
+      final lon = position?.longitude ?? 126.9780;
+      final bool usingFallback = position == null;
+
+      await _fetchWeatherFromCoords(lat, lon, usingFallback: usingFallback);
+    } catch (e) {
+      debugPrint("날씨/미세먼지 불러오기 실패: $e");
+    }
+  }
+
+  Future<void> _fetchWeatherFromCoords(double lat, double lon, {bool usingFallback = false}) async {
+    try {
       final weatherUrl = 'https://api.openweathermap.org/data/2.5/weather?lat=$lat&lon=$lon&appid=${AppConfig.weatherApiKey}&units=metric&lang=kr';
-      final weatherRes = await http.get(Uri.parse(weatherUrl));
-      
-      // 2. 대기 오염 (미세먼지)
       final airUrl = 'https://api.openweathermap.org/data/2.5/air_pollution?lat=$lat&lon=$lon&appid=${AppConfig.weatherApiKey}';
-      final airRes = await http.get(Uri.parse(airUrl));
+
+      final results = await Future.wait([
+        http.get(Uri.parse(weatherUrl)),
+        http.get(Uri.parse(airUrl)),
+      ]);
+      final weatherRes = results[0];
+      final airRes = results[1];
 
       if (weatherRes.statusCode == 200 && mounted) {
         final data = json.decode(weatherRes.body);
-        String krLocationName = data['name'];
-        try {
-          final nomUrl = 'https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&accept-language=ko';
-          final nomRes = await http.get(Uri.parse(nomUrl), headers: {'User-Agent': 'ttubuk_ttubuk_app'});
-          if (nomRes.statusCode == 200) {
-             final nomData = json.decode(utf8.decode(nomRes.bodyBytes));
-             if (nomData['address'] != null) {
+        String krLocationName = usingFallback ? '서울' : (data['name'] ?? '알 수 없음');
+        if (!usingFallback) {
+          try {
+            final nomUrl = 'https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&accept-language=ko';
+            final nomRes = await http.get(Uri.parse(nomUrl), headers: {'User-Agent': 'ttubuk_ttubuk_app'});
+            if (nomRes.statusCode == 200) {
+              final nomData = json.decode(utf8.decode(nomRes.bodyBytes));
+              if (nomData['address'] != null) {
                 final addr = nomData['address'];
-                // 동/읍/면 단위 우선, 없으면 구/시 단위
                 krLocationName = addr['suburb'] ?? addr['town'] ?? addr['borough'] ?? addr['city'] ?? data['name'];
-             }
-          }
-        } catch (_) {}
-
-        setState(() {
-          _weatherTemp = data['main']['temp'].toStringAsFixed(1);
-          _weatherDesc = data['weather'][0]['description'];
-          _locationName = krLocationName;
-          _setWeatherIcon(data['weather'][0]['main']);
-        });
+              }
+            }
+          } catch (_) {}
+        }
+        if (mounted) {
+          setState(() {
+            _weatherTemp = data['main']['temp'].toStringAsFixed(1);
+            _weatherDesc = data['weather'][0]['description'];
+            _locationName = krLocationName;
+            _setWeatherIcon(data['weather'][0]['main']);
+          });
+        }
       }
-      
+
       if (airRes.statusCode == 200 && mounted) {
         final data = json.decode(airRes.body);
         if (data['list'] != null && data['list'].isNotEmpty) {
           final components = data['list'][0]['components'];
-          setState(() {
-            _pm10 = (components['pm10'] as num?)?.toDouble();
-            _pm25 = (components['pm2_5'] as num?)?.toDouble();
-          });
+          if (mounted) {
+            setState(() {
+              _pm10 = (components['pm10'] as num?)?.toDouble();
+              _pm25 = (components['pm2_5'] as num?)?.toDouble();
+            });
+          }
         }
       }
-    } catch (e) { debugPrint("날씨/미세먼지 불러오기 실패: $e"); }
+    } catch (e) {
+      debugPrint("날씨 API 호출 실패: $e");
+    }
   }
 
   void _setWeatherIcon(String main) {
@@ -383,6 +431,43 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
   void _handleRecommend() async {
     setState(() { isLoading = true; _currentStep = 3; _recommendedParks = []; _aiRecommendationText = null; });
     try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user != null) {
+        final prefs = await SharedPreferences.getInstance();
+        final personality = prefs.getString('pref_${user.id}_personality');
+        if (personality == null || personality.isEmpty) {
+          if (mounted) {
+            setState(() { isLoading = false; _currentStep = 2; });
+            showDialog(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                backgroundColor: const Color(0xFF161B22),
+                title: const Text('산책 성향 분석 필요', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                content: const Text('정확한 AI 맞춤 공원 추천을 위해\n설정 탭의 산책 성향 분석 테스트를 먼저 진행해 주세요!', style: TextStyle(color: Colors.white70)),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('취소', style: TextStyle(color: Colors.grey)),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      // Switch to Profile Tab
+                      final mainState = TutorialKeys.mainLayoutKey.currentState;
+                      if (mainState != null) {
+                        mainState.setTabIndex(3);
+                      }
+                    },
+                    child: const Text('설정으로 이동', style: TextStyle(color: Color(0xFF2EA043), fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            );
+          }
+          return;
+        }
+      }
+
       List<LatLng> route;
       double dist;
       
@@ -393,7 +478,13 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
         route = await _getDesignatedRoute();
         if (route.isEmpty) {
           try {
-            final position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.medium);
+            Position? position = await Geolocator.getLastKnownPosition();
+            if (position == null) {
+              position = await Geolocator.getCurrentPosition(
+                desiredAccuracy: LocationAccuracy.medium,
+                timeLimit: const Duration(seconds: 3),
+              );
+            }
             route = [LatLng(position.latitude, position.longitude)];
           } catch (_) {
             route = [const LatLng(37.5665, 126.9780)];
@@ -478,17 +569,21 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
   }
 
   Widget _buildWeatherBadge(Color textColor, bool isDark) {
-    return GlassmorphicContainer(
-      width: 110, height: 50, borderRadius: 12, blur: 20, alignment: Alignment.center, border: 1,
-      linearGradient: LinearGradient(colors: [textColor.withOpacity(0.1), textColor.withOpacity(0.05)]),
-      borderGradient: LinearGradient(colors: [textColor.withOpacity(0.2), textColor.withOpacity(0.05)]),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(_weatherIcon, size: 20, color: _weatherIconColor),
-          const SizedBox(width: 8),
-          Text('$_weatherTemp°C', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textColor)),
-        ],
+    return Showcase(
+      key: TutorialKeys.homeWeatherKey,
+      description: '오늘의 날씨와 기온을 한눈에 확인하세요!',
+      child: GlassmorphicContainer(
+        width: 110, height: 50, borderRadius: 12, blur: 20, alignment: Alignment.center, border: 1,
+        linearGradient: LinearGradient(colors: [textColor.withOpacity(0.1), textColor.withOpacity(0.05)]),
+        borderGradient: LinearGradient(colors: [textColor.withOpacity(0.2), textColor.withOpacity(0.05)]),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(_weatherIcon, size: 20, color: _weatherIconColor),
+            const SizedBox(width: 8),
+            Text('$_weatherTemp°C', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textColor)),
+          ],
+        ),
       ),
     );
   }
@@ -632,14 +727,17 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
           child: Column(
             children: [
               const SizedBox(height: 20),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: textColor.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: const Color(0xFF2EA043).withOpacity(0.3)),
-                ),
+              Showcase(
+                key: TutorialKeys.homeRouteKey,
+                description: '지정된 산책 루트를 불러오고, AI 분석을 시작하는 공간입니다.',
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: textColor.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: const Color(0xFF2EA043).withOpacity(0.3)),
+                  ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -735,7 +833,8 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
                   ],
                 ),
               ),
-              const SizedBox(height: 40),
+            ),
+            const SizedBox(height: 40),
               SizedBox(
                 width: double.infinity, height: 64,
                 child: ElevatedButton(

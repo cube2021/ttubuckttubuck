@@ -7,7 +7,8 @@
 [![Gemini AI](https://img.shields.io/badge/AI-Gemini_&_Groq-8E75B2?logo=google-gemini)](https://deepmind.google/technologies/gemini/)
 
 ### 📥 [Android 앱 다운로드 (APK)](https://github.com/cube2021/ttubuckttubuck/raw/main/apk/ttubuckttubuck-release.apk)
-*최신 버전 앱을 다운로드하여 바로 설치해보세요!*
+![APK Version](https://img.shields.io/badge/APK-v2.0.0-brightgreen?logo=android)
+*최신 버전 앱을 다운로드하여 바로 설치해보세요! (최종 업데이트: 2026-06-26)*
 
 ## ✨ 주요 기능 (Key Features)
 

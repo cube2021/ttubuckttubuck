@@ -6,6 +6,8 @@ import 'package:glassmorphism/glassmorphism.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'map_screen.dart';
+import 'package:showcaseview/showcaseview.dart';
+import '../utils/tutorial_keys.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -44,6 +46,11 @@ class _HistoryScreenState extends State<HistoryScreen> with AutomaticKeepAliveCl
         _records = List<Map<String, dynamic>>.from(data);
         _isLoading = false;
       });
+      if (TutorialKeys.isTutorialRunning) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          TutorialKeys.mainLayoutKey.currentState?.startHistoryTutorial();
+        });
+      }
     } catch (e) {
       debugPrint('기록 불러오기 실패: $e');
       setState(() => _isLoading = false);
@@ -93,7 +100,11 @@ class _HistoryScreenState extends State<HistoryScreen> with AutomaticKeepAliveCl
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('내 산책 기록', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: textColor)),
+                    Showcase(
+                      key: TutorialKeys.historyListKey,
+                      description: '내가 지금까지 다녀온 모든 산책로, 거리, 시간 등 나의 활동 기록들을 모아서 분석해 줍니다.',
+                      child: Text('내 산책 기록', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: textColor)),
+                    ),
                     const SizedBox(height: 20),
                     if (!_isLoading && _records.isNotEmpty) _buildSummaryCard(textColor, cardColor),
                   ],
@@ -116,17 +127,21 @@ class _HistoryScreenState extends State<HistoryScreen> with AutomaticKeepAliveCl
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const MapScreen()),
-          );
-          _fetchRecords();
-        },
-        backgroundColor: const Color(0xFF2EA043),
-        icon: const Icon(LucideIcons.footprints, color: Colors.white),
-        label: const Text('산책하기', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+      floatingActionButton: Showcase(
+        key: TutorialKeys.historyWalkButtonKey,
+        description: '지금 바로 산책을 시작하고 나만의 멋진 경로를 기록해 보세요!',
+        child: FloatingActionButton.extended(
+          onPressed: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const MapScreen()),
+            );
+            _fetchRecords();
+          },
+          backgroundColor: const Color(0xFF2EA043),
+          icon: const Icon(LucideIcons.footprints, color: Colors.white),
+          label: const Text('산책하기', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        ),
       ),
     );
   }

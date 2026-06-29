@@ -120,13 +120,26 @@ class WeatherContext {
     }
   }
 
+  /// 불쾌지수 (THI: Temperature-Humidity Index)
+  double? get discomfortIndex {
+    final t = temperatureC;
+    final h = humidity;
+    if (t == null || h == null) return null;
+    return 1.8 * t - 0.55 * (1 - h / 100.0) * (1.8 * t - 26) + 32;
+  }
+
   String get comfortSummary {
     final parts = <String>[description];
     if (temperatureC != null) parts.add('${temperatureC!.toStringAsFixed(1)}°C');
     if (humidity != null) parts.add('습도 ${humidity!.toInt()}%');
-    if (heatIndex != null && heatDangerLevel >= 1) {
+    
+    final thi = discomfortIndex;
+    if (thi != null && thi >= 75) {
+      parts.add('불쾌지수 높음');
+    } else if (heatIndex != null && heatDangerLevel >= 1) {
       parts.add('체감 ${heatIndex!.toStringAsFixed(1)}°C');
     }
+    
     if (precipitationProbability != null && precipitationProbability! > 0.3) {
       parts.add('강수확률 ${(precipitationProbability! * 100).toInt()}%');
     }
@@ -137,40 +150,103 @@ class WeatherContext {
   /// 종합 날씨 요소를 바탕으로 산책 적합도를 100점 만점으로 수치화
   int get walkingScore {
     int score = 100;
-    if (isRainy) score -= 50; // 비/눈 오면 큰 폭의 패널티
-    if (isHot) score -= 25;   // 폭염 패널티
-    if (isCold) score -= 25;  // 한파 패널티
-    if (isPoorAir) score -= 20; // 미세먼지 나쁨 패널티
+    
+    // 1. 강수 패널티 (눈/비)
+    if (isRainy) score -= 60;
+    if (precipitationProbability != null) {
+      if (precipitationProbability! >= 0.8) score -= 40;
+      else if (precipitationProbability! >= 0.5) score -= 20;
+      else if (precipitationProbability! >= 0.3) score -= 10;
+    }
 
-    // 체감온도 추가 패널티
+    // 2. 기온 패널티 (최적: 15~22도)
+    if (temperatureC != null) {
+      final t = temperatureC!;
+      if (t >= 33) score -= 30; // 폭염 경보급
+      else if (t >= 28) score -= 15; // 폭염 주의보급
+      else if (t >= 23) score -= 5; // 약간 더움
+      else if (t < 5) score -= 30; // 한파
+      else if (t < 10) score -= 15; // 추움
+      else if (t < 15) score -= 5; // 쌀쌀함
+    } else {
+      if (isHot) score -= 25;
+      if (isCold) score -= 25;
+    }
+
+    // 3. 체감온도(Heat Index) 추가 패널티 (열사병 위험)
     final level = heatDangerLevel;
     if (level == 1) score -= 10;
     if (level == 2) score -= 25;
     if (level >= 3) score -= 40;
 
-    // 추가적인 대기오염 디테일 패널티
-    if (pm10 != null && pm10! > 150) score -= 20;
-    if (pm25 != null && pm25! > 75)  score -= 20;
+    // 4. 불쾌지수(THI) 패널티 (기온/습도 복합)
+    final thi = discomfortIndex;
+    if (thi != null) {
+      if (thi >= 80) score -= 30; // 80 이상: 매우 불쾌 (대부분 불쾌감)
+      else if (thi >= 75) score -= 15; // 75 이상: 50% 정도 불쾌감
+      else if (thi >= 68) score -= 5; // 68 이상: 일부 불쾌감
+    } else if (humidity != null) {
+      if (humidity! >= 90) score -= 20;
+      else if (humidity! >= 80) score -= 10;
+    }
+
+    // 5. 대기질(미세먼지) 패널티 및 보너스
+    if (pm10 != null || pm25 != null) {
+      if (pm10 != null) {
+        if (pm10! > 150) score -= 30; // 매우 나쁨
+        else if (pm10! > 80) score -= 15; // 나쁨
+        else if (pm10! <= 30) score += 5; // 좋음 가산점
+      }
+      if (pm25 != null) {
+        if (pm25! > 75) score -= 40; // 초미세 매우 나쁨
+        else if (pm25! > 35) score -= 20; // 초미세 나쁨
+        else if (pm25! <= 15) score += 5; // 초미세 좋음 가산점
+      }
+    } else {
+      if (isPoorAir) score -= 20;
+    }
 
     return score.clamp(0, 100);
   }
 
-  /// 산책 적합성에 대한 직관적인 3단계 텍스트 라벨
+  /// 산책 적합성에 대한 직관적인 5단계 텍스트 라벨
   String get walkingEvaluation {
     final score = walkingScore;
-    if (score >= 85) return '산책하기 아주 좋은 날씨예요! ☀️';
-    if (score >= 60) return '산책하기 무난한 날씨예요 ⛅';
-    return '오늘은 실내 걷기를 추천해요 ⚠️';
+    if (score >= 90) return '완벽한 산책 날씨예요! 🌿';
+    if (score >= 75) return '산책하기 좋은 날씨예요 ☀️';
+    if (score >= 50) return '산책하기 무난한 날씨예요 ⛅';
+    if (score >= 30) return '야외 활동에 주의가 필요해요 ⚠️';
+    return '오늘은 실내 활동을 추천해요 🚫';
   }
 
-  /// 상태별 맞춤형 코치 팁 메시지
+  /// 상태별 맞춤형 정밀 코치 팁 메시지
   String get walkingTip {
-    if (isRainy) return '비나 눈 소식이 있으니 안전에 주의하시고, 우산을 꼭 챙기세요. ☔';
-    if (shouldShowHeatWarning) return '체감온도가 매우 높습니다! 야외 산책은 자제하고 꼭 나가야 한다면 수분을 충분히 챙기세요. 🥵';
-    if (isPoorAir) return '미세먼지 수치가 높습니다! 야외 산책 시 KF 마스크를 착용하세요. 😷';
-    if (isHot) return '기온이 다소 높으니 선크림을 바르고 시원한 물을 소지하세요. 🥵';
-    if (isCold) return '날씨가 매우 춥습니다. 장갑과 머플러를 하고 보온에 유의하세요. 🥶';
-    return '바람도 선선하고 대기 상태도 양호하여 산책하기에 최적입니다. 즐거운 뚜벅이 시간 되세요! 🌱';
+    if (isRainy || (precipitationProbability != null && precipitationProbability! >= 0.8)) {
+      return '비나 눈이 강하게 예상됩니다. 실내에서 휴식하는 것을 추천드려요. ☔';
+    }
+    if (shouldShowHeatWarning || (temperatureC != null && temperatureC! >= 33)) {
+      return '폭염으로 온열질환 위험이 큽니다. 외출을 자제하고 수분을 충분히 섭취하세요! 🥵';
+    }
+    if ((pm25 != null && pm25! > 75) || (pm10 != null && pm10! > 150)) {
+      return '대기질이 매우 나쁩니다. 가급적 야외 활동을 피하고 실내에 머무르세요. 😷';
+    }
+    final thi = discomfortIndex;
+    if (thi != null && thi >= 80) {
+      return '불쾌지수가 매우 높습니다! 땀이 많이 나고 쉽게 지칠 수 있으니 무리한 산책은 피하세요. 💦';
+    }
+    if (temperatureC != null && temperatureC! < 5) {
+      return '날씨가 몹시 춥습니다. 빙판길 미끄럼에 주의하시고 방한에 신경 쓰세요. 🥶';
+    }
+    if (walkingScore >= 90) {
+      return '모든 조건이 최적인 날입니다! 지금 당장 나가서 상쾌한 공기를 마셔보세요! ✨';
+    }
+    if (walkingScore >= 75) {
+      return '기분 전환하기 좋은 날씨입니다. 가벼운 발걸음으로 산책을 즐겨보세요! 🚶‍♂️';
+    }
+    if (walkingScore < 50 && pm25 != null && pm25! > 35) {
+      return '초미세먼지 농도가 짙습니다. 마스크를 챙기시고 짧게 다녀오세요. 🤧';
+    }
+    return '날씨 변화를 확인하며 적당한 속도로 산책을 즐겨보세요. ☁️';
   }
 
   String get walkingScoreMessage {
