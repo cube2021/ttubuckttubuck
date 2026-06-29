@@ -45,7 +45,7 @@ class _AppGuideDialogState extends State<AppGuideDialog> {
     },
     {
       'title': 'AI 맞춤 공원 추천 🤖',
-      'description': '오늘의 날씨, 미세먼지, 기분을 선택하면 AI가 가장 걷기 좋은 공원을 찾아줍니다.',
+      'description': '오늘의 기분을 선택하면 사용자님의 선호 데이터를 통해 AI가 가장 걷기 좋은 공원을 찾아줍니다.',
       'icon': LucideIcons.sparkles,
       'color': Colors.amber,
     },
