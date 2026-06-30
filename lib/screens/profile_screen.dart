@@ -4,7 +4,6 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:glassmorphism/glassmorphism.dart';
 import 'package:provider/provider.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:shorebird_code_push/shorebird_code_push.dart';
 import '../services/theme_provider.dart';
 import 'display_settings_screen.dart';
 import 'my_route_settings_screen.dart';
@@ -33,9 +32,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _userGender;
   String? _userPersonality;
   String _appVersion = '불러오는 중...';
-  String _shorebirdPatchInfo = 'Shorebird 패치 확인 중...';
-  final _shorebirdUpdater = ShorebirdUpdater();
-  
   bool _isLoading = false;
   bool _isSignUp = false;
   User? _user;
@@ -45,7 +41,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _initPackageInfo();
-    _initShorebirdInfo();
     _loadExperimentalSetting();
     _user = Supabase.instance.client.auth.currentUser;
     if (_user != null) {
@@ -82,32 +77,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  Future<void> _initShorebirdInfo() async {
-    try {
-      final isAvailable = _shorebirdUpdater.isAvailable;
-      if (!isAvailable) {
-        setState(() {
-          _shorebirdPatchInfo = 'Shorebird 미지원 또는 디버그 빌드';
-        });
-        return;
-      }
-      
-      final patch = await _shorebirdUpdater.readCurrentPatch();
-      if (patch != null) {
-        setState(() {
-          _shorebirdPatchInfo = 'Shorebird Patch ${patch.number} 적용됨';
-        });
-      } else {
-        setState(() {
-          _shorebirdPatchInfo = 'Shorebird 적용됨 (패치 없음)';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _shorebirdPatchInfo = 'Shorebird 정보 로드 실패';
-      });
-    }
-  }
+
 
   Future<void> _initPackageInfo() async {
     try {
@@ -326,14 +296,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                     Divider(color: textColor.withOpacity(0.05), height: 1),
-                    ListTile(
-                      onTap: () => Navigator.pushNamed(context, '/logs'),
-                      leading: const Icon(LucideIcons.fileText, color: Color(0xFF2EA043)),
-                      title: Text('앱 로그 보기', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textColor)),
-                      trailing: Icon(LucideIcons.chevronRight, size: 20, color: textColor.withOpacity(0.3)),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                    ),
-                    Divider(color: textColor.withOpacity(0.05), height: 1),
+
                     SwitchListTile(
                       value: _experimentalEnabled,
                       onChanged: (bool value) async {
@@ -379,7 +342,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 40),
               Center(
                 child: Text(
-                  '$_shorebirdPatchInfo ($_appVersion)',
+                  _appVersion,
                   style: TextStyle(color: textColor.withOpacity(0.3), fontSize: 11),
                 ),
               ),

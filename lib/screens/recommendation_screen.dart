@@ -956,6 +956,24 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
                         Text(park.name, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor)),
                         const SizedBox(height: 4),
                         Text(park.openDate, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                        if (park.hasToilet || park.hasParking) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              if (park.hasToilet) ...[
+                                const Icon(Icons.wc, size: 12, color: Colors.blueAccent),
+                                const SizedBox(width: 2),
+                                Text('화장실', style: TextStyle(fontSize: 11, color: textColor.withOpacity(0.6))),
+                                const SizedBox(width: 6),
+                              ],
+                              if (park.hasParking) ...[
+                                const Icon(Icons.local_parking, size: 12, color: Colors.indigo),
+                                const SizedBox(width: 2),
+                                Text('주차장', style: TextStyle(fontSize: 11, color: textColor.withOpacity(0.6))),
+                              ],
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -1104,6 +1122,24 @@ class _RecommendationScreenState extends State<RecommendationScreen> with Automa
                                   Text(park.name, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor)),
                                   const SizedBox(height: 4),
                                   Text(park.typeLabel, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                                  if (park.hasToilet || park.hasParking) ...[
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        if (park.hasToilet) ...[
+                                          const Icon(Icons.wc, size: 12, color: Colors.blueAccent),
+                                          const SizedBox(width: 2),
+                                          Text('화장실', style: TextStyle(fontSize: 11, color: textColor.withOpacity(0.6))),
+                                          const SizedBox(width: 6),
+                                        ],
+                                        if (park.hasParking) ...[
+                                          const Icon(Icons.local_parking, size: 12, color: Colors.indigo),
+                                          const SizedBox(width: 2),
+                                          Text('주차장', style: TextStyle(fontSize: 11, color: textColor.withOpacity(0.6))),
+                                        ],
+                                      ],
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),

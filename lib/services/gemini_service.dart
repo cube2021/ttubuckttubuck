@@ -190,7 +190,7 @@ class GeminiService {
         buffer.writeln('- 맞춤 태그: ${p.enrichedTags.join(", ")}');
       }
       buffer.writeln('- 평점: ${p.rating} / 5.0');
-      buffer.writeln('- 편의시설: 화장실(${p.hasToilet ? "O" : "X"}), 벤치(${p.hasBench ? "O" : "X"}), 조명(${p.hasLighting ? "O" : "X"})');
+      buffer.writeln('- 편의시설: 주차장(${p.hasParking ? "O" : "X"}), 화장실(${p.hasToilet ? "O" : "X"}), 벤치(${p.hasBench ? "O" : "X"}), 조명(${p.hasLighting ? "O" : "X"})');
       buffer.writeln('- 면적: ${p.area.toInt()}m²');
       buffer.writeln('- 추천 내부 경로 목록:');
       if (p.routes.isEmpty) {
@@ -485,8 +485,9 @@ class GeminiService {
     buffer.writeln("현재 AI 서버가 혼잡하여 **기본 맞춤 코스**를 즉시 안내해 드립니다.\n");
     
     buffer.writeln("지금 같은 **$weather**, 기분이 **$mood**일 때에는 **${topPark.name}**을(를) 추천해 드려요!");
-    if (topPark.hasBench || topPark.hasToilet) {
+    if (topPark.hasBench || topPark.hasToilet || topPark.hasParking) {
       final features = [];
+      if (topPark.hasParking) features.add("주차장");
       if (topPark.hasBench) features.add("벤치");
       if (topPark.hasToilet) features.add("화장실");
       buffer.writeln("이곳은 ${features.join(', ')} 등의 편의시설이 마련되어 있어 더욱 쾌적하게 산책할 수 있습니다.\n");
