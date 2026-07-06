@@ -6,7 +6,7 @@
 [![Backend Supabase](https://img.shields.io/badge/Supabase-Backend-3ECF8E?logo=supabase)](https://supabase.com/)
 [![Gemini AI](https://img.shields.io/badge/AI-Gemini_&_Groq-8E75B2?logo=google-gemini)](https://deepmind.google/technologies/gemini/)
 
-### 📥 [Android 앱 다운로드 (APK)](https://drive.google.com/drive/folders/117LmquzpKmVE1SIkFqAMTyw3XKx6n6wb?hl=ko)
+### 📥 [Android 앱 다운로드 (APK)]
 ![APK Version](https://img.shields.io/badge/APK-v2.1.0-brightgreen?logo=android)
 *최신 버전 앱을 다운로드하여 바로 설치해보세요! (최종 업데이트: 2026-06-29)*
 
